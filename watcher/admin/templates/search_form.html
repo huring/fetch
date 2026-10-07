@@ -49,14 +49,19 @@
     </fieldset>
 
     <fieldset>
-        <legend>Source queries</legend>
-        {% for m in marketplaces %}
-        <label>{{ m.display_name }} queries <span class="hint">({{ m.query_line_hint }})</span>
-            <textarea name="marketplace_queries__{{ m.key }}">{{ form.marketplace_queries[m.key] }}</textarea>
+        <legend>Search terms</legend>
+        <label>Search phrases <span class="hint">(one per line - run on every marketplace selected below)</span>
+            <textarea name="search_phrases">{{ form.search_phrases }}</textarea>
         </label>
-        {% else %}
-        <p class="muted">No marketplaces registered.</p>
-        {% endfor %}
+        <label>Marketplaces
+            {% for m in marketplaces %}
+            <span style="display:block;">
+                <input type="checkbox" name="marketplaces" value="{{ m.key }}" {{ "checked" if m.key in form.marketplaces else "" }} style="width:auto;display:inline;"> {{ m.display_name }}
+            </span>
+            {% else %}
+            <span class="muted">No marketplaces registered.</span>
+            {% endfor %}
+        </label>
     </fieldset>
 
     <div class="actions">

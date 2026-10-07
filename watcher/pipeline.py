@@ -53,7 +53,7 @@ def run_marketplace_cycle(
 
     run_id = storage.start_run(conn)
     touched_searches = [
-        s for s in searches_repo.list_searches(conn, enabled_only=True) if s.marketplace_queries.get(marketplace_key)
+        s for s in searches_repo.list_searches(conn, enabled_only=True) if marketplace_key in s.marketplaces
     ]
 
     errors = 0
@@ -67,11 +67,10 @@ def run_marketplace_cycle(
     try:
         for search in touched_searches:
             listings: List[Listing] = []
-            for raw_query in search.marketplace_queries[marketplace_key]:
-                query = marketplace.query_model(**raw_query)
+            for phrase in search.search_phrases:
                 attempts += 1
                 try:
-                    fetched = marketplace.fetch(query, search=search, config=config, settings=settings)
+                    fetched = marketplace.fetch(phrase, search=search, config=config, settings=settings)
                     items_fetched += len(fetched)
                     listings.extend(fetched)
                 except SourceError as exc:

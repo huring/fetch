@@ -16,13 +16,6 @@ class WatchedModel(BaseModel):
     good_price: str = ""
 
 
-class BlocketQuery(BaseModel):
-    q: str
-    category: Optional[str] = None
-    sub_category: Optional[str] = None
-    region: Optional[str] = None
-
-
 class Search(BaseModel):
     id: Optional[int] = None
     name: str
@@ -37,11 +30,14 @@ class Search(BaseModel):
     watched_models: List[WatchedModel] = Field(default_factory=list)
     hard_criteria: List[str] = Field(default_factory=list)
     soft_criteria: List[str] = Field(default_factory=list)
-    # Keyed by marketplace key (e.g. "blocket"); each value is a list of raw
-    # dicts matching that marketplace's query_model, validated on use via the
-    # marketplace registry rather than at the Search model level, so adding a
-    # new marketplace never requires changing this schema.
-    marketplace_queries: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+    # The actual search terms to run, shared across every marketplace this
+    # search is attached to - each marketplace decides how to use them (e.g.
+    # as a Blocket "q" param), so this stays plain text rather than a
+    # marketplace-specific query shape.
+    search_phrases: List[str] = Field(default_factory=list)
+    # Registry keys (see marketplaces.py) of the marketplaces this search
+    # runs on, e.g. ["blocket"].
+    marketplaces: List[str] = Field(default_factory=list)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

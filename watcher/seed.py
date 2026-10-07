@@ -40,9 +40,8 @@ def _default_searches():
                 WatchedModel(pattern="SR6010", note="Marantz, ~2015", good_price="3000-4000 SEK"),
             ],
             excluded_models=["TX-SR607", "TX-SR578", "NR1604", "SR3001", "SR6003", "AVR-1509"],
-            marketplace_queries={
-                "blocket": [{"q": "onkyo tx-nr"}, {"q": "marantz sr"}, {"q": "marantz nr"}],
-            },
+            search_phrases=["onkyo tx-nr", "marantz sr", "marantz nr"],
+            marketplaces=["blocket"],
         ),
         Search(
             name="Living room - subwoofer",
@@ -56,9 +55,8 @@ def _default_searches():
                 WatchedModel(pattern="Spirit Sub 12", note="XTZ, used", good_price="2500-4000 SEK"),
             ],
             excluded_models=["Sub 12.17"],
-            marketplace_queries={
-                "blocket": [{"q": "klipsch subwoofer"}, {"q": "xtz sub"}],
-            },
+            search_phrases=["klipsch subwoofer", "xtz sub"],
+            marketplaces=["blocket"],
         ),
         Search(
             name="Living room - front speakers",
@@ -92,13 +90,12 @@ def _default_searches():
                 WatchedModel(pattern="301*i", note="Q Acoustics 3010i/3020i/3030i, standmount, 6 ohm nominal (4 ohm min), Carbon Black available", good_price="2000-3500 SEK/pair"),
                 WatchedModel(pattern="3050i", note="Q Acoustics, floorstanding, 6 ohm nominal, Carbon Black available", good_price="4000-6000 SEK/pair"),
             ],
-            marketplace_queries={
-                "blocket": [
-                    {"q": "dali oberon"}, {"q": "dali spektor"}, {"q": "dali rubicon"},
-                    {"q": "wharfedale diamond"}, {"q": "wharfedale evo"},
-                    {"q": "q acoustics 3"},
-                ],
-            },
+            search_phrases=[
+                "dali oberon", "dali spektor", "dali rubicon",
+                "wharfedale diamond", "wharfedale evo",
+                "q acoustics 3",
+            ],
+            marketplaces=["blocket"],
         ),
         Search(
             name="Living room - center speaker",
@@ -108,14 +105,16 @@ def _default_searches():
                 "A center from the same series/brand as the new front speakers scores higher (tonal matching)",
                 "A standalone center with no matching front speakers only scores high at a really good price",
             ],
-            marketplace_queries={"blocket": [{"q": "centerhögtalare"}]},
+            search_phrases=["centerhögtalare"],
+            marketplaces=["blocket"],
         ),
         Search(
             name="Living room - rear speakers",
             scope="national",
             enabled=False,
             soft_criteria=["Not actively watched - only score 8+ for a major upgrade in a discreet/compact format"],
-            marketplace_queries={"blocket": [{"q": "bakhögtalare surround"}]},
+            search_phrases=["bakhögtalare surround"],
+            marketplaces=["blocket"],
         ),
         Search(
             name="Stugan hifi",
@@ -137,13 +136,12 @@ def _default_searches():
                 WatchedModel(pattern="Douk Audio*", note="retro amplifier"),
                 WatchedModel(pattern="Nobsound*", note="retro amplifier"),
             ],
-            marketplace_queries={
-                "blocket": [
-                    {"q": "leak stereo 130"}, {"q": "pioneer sx-450"}, {"q": "pioneer sx-550"},
-                    {"q": "sansui receiver"}, {"q": "kenwood kr"}, {"q": "marantz 22"},
-                    {"q": "luxor receiver"}, {"q": "tandberg receiver"},
-                    {"q": "douk audio"}, {"q": "nobsound"},
-                ],
-            },
+            search_phrases=[
+                "leak stereo 130", "pioneer sx-450", "pioneer sx-550",
+                "sansui receiver", "kenwood kr", "marantz 22",
+                "luxor receiver", "tandberg receiver",
+                "douk audio", "nobsound",
+            ],
+            marketplaces=["blocket"],
         ),
     ]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import List
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS searches (
@@ -26,7 +27,8 @@ CREATE TABLE IF NOT EXISTS searches (
     watched_models TEXT NOT NULL DEFAULT '[]',
     hard_criteria TEXT NOT NULL DEFAULT '[]',
     soft_criteria TEXT NOT NULL DEFAULT '[]',
-    marketplace_queries TEXT NOT NULL DEFAULT '{}',
+    search_phrases TEXT NOT NULL DEFAULT '[]',
+    marketplaces TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -152,6 +154,45 @@ def _migrate_blocket_tradera_queries(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_marketplace_queries_to_search_phrases(conn: sqlite3.Connection) -> None:
+    """One-time collapse of the per-marketplace ``marketplace_queries`` JSON
+    column into two generic columns: ``search_phrases`` (the union of every
+    "q" value across all marketplaces that search used, in order, deduped)
+    and ``marketplaces`` (which registry keys had any queries at all). This
+    trades per-marketplace query variations for a single shared phrase list -
+    acceptable since every search in practice only ever used one marketplace
+    (Blocket) with identical phrasing."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "searches" not in tables:
+        return
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(searches)")}
+    if "search_phrases" in columns:
+        return  # already migrated (or a fresh DB that never had the old column)
+
+    conn.execute("ALTER TABLE searches ADD COLUMN search_phrases TEXT NOT NULL DEFAULT '[]'")
+    conn.execute("ALTER TABLE searches ADD COLUMN marketplaces TEXT NOT NULL DEFAULT '[]'")
+
+    if "marketplace_queries" in columns:
+        rows = conn.execute("SELECT id, marketplace_queries FROM searches").fetchall()
+        for row in rows:
+            marketplace_queries = json.loads(row["marketplace_queries"] or "{}")
+            phrases: List[str] = []
+            for queries in marketplace_queries.values():
+                for raw_query in queries:
+                    q = raw_query.get("q")
+                    if q and q not in phrases:
+                        phrases.append(q)
+            marketplace_keys = sorted(key for key, queries in marketplace_queries.items() if queries)
+            conn.execute(
+                "UPDATE searches SET search_phrases = ?, marketplaces = ? WHERE id = ?",
+                (json.dumps(phrases), json.dumps(marketplace_keys), row["id"]),
+            )
+        conn.execute("ALTER TABLE searches DROP COLUMN marketplace_queries")
+
+    conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -160,6 +201,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     _migrate_legacy_names(conn)
     _migrate_blocket_tradera_queries(conn)
+    _migrate_marketplace_queries_to_search_phrases(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

@@ -1,6 +1,5 @@
 import responses
 
-from watcher.models import BlocketQuery
 from watcher.sources import blocket
 from watcher.sources.base import SourceError
 
@@ -27,7 +26,7 @@ def test_fetch_parses_listings():
     )
     responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200)
 
-    listings = blocket.fetch(BlocketQuery(q="onkyo"))
+    listings = blocket.fetch("onkyo")
 
     assert len(listings) == 1
     listing = listings[0]
@@ -45,7 +44,7 @@ def test_fetch_parses_listings():
 def test_fetch_stops_on_empty_page():
     responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200)
 
-    listings = blocket.fetch(BlocketQuery(q="nonexistent"))
+    listings = blocket.fetch("nonexistent")
 
     assert listings == []
     assert len(responses.calls) == 1
@@ -61,7 +60,7 @@ def test_fetch_skips_ad_without_id():
     )
     responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200)
 
-    listings = blocket.fetch(BlocketQuery(q="onkyo"))
+    listings = blocket.fetch("onkyo")
 
     assert listings == []
 
@@ -71,7 +70,7 @@ def test_fetch_raises_source_error_on_http_failure():
     responses.add(responses.GET, blocket.SEARCH_URL, status=500)
 
     try:
-        blocket.fetch(BlocketQuery(q="onkyo"))
+        blocket.fetch("onkyo")
         assert False, "expected SourceError"
     except SourceError:
         pass

@@ -12,8 +12,8 @@ back as a proper marketplace if/when it's needed.
 ## How it works
 
 1. **Fetch** - each marketplace polls on its own schedule (see "Marketplaces"
-   below), running every enabled search's queries for that marketplace
-   sequentially, with a short delay between requests.
+   below), running every enabled search's phrases that's attached to that
+   marketplace sequentially, with a short delay between requests.
 2. **Dedupe** - seen listings and price history live in SQLite, keyed per
    `(search, source, listing id)`. A price drop on a previously-seen listing
    is treated as new again.
@@ -40,10 +40,12 @@ Everything you watch for is a **search**: a name, a scope (local/national + a
 location), whether shipping should be required, a deterministic prefilter
 (max price / excluded models / excluded words / required keywords), free-text
 hard and soft criteria for Claude's judgment, watched models (wildcard pattern
-+ note + rough good price), and the actual search queries to run - one list
-per marketplace it's attached to (a search can use more than one). The search
-form only shows a query box for marketplaces that are actually registered -
-today that's just Blocket.
++ note + rough good price), and a shared list of search phrases - all stored
+once on the search itself, not duplicated per marketplace. A search also
+picks which registered marketplace(s) it runs on (today, just Blocket); each
+marketplace decides how to use the search's phrases and other settings (e.g.
+Blocket uses the phrase as its "q" param and the location for local-scope
+searches) rather than storing its own copy of them.
 
 Searches live in the same SQLite database as everything else and are managed
 entirely through the admin UI at `http://<host>:8000/searches` - there are no
@@ -56,17 +58,17 @@ On first boot (empty database), the app seeds the hifi searches this project
 was originally built around (`watcher/seed.py`) - review their scope/location
 in the UI, since they default to national/no-location.
 
-List fields in the form (excluded models, watched models, queries, ...) are
-edited as plain text, one entry per line - the format for multi-part fields
-(watched models, queries) is shown as a hint under each field.
+List fields in the form (excluded models, watched models, search phrases, ...)
+are edited as plain text, one entry per line - the format for multi-part
+fields (watched models) is shown as a hint under each field.
 
 ## Marketplaces
 
 A marketplace (`watcher/marketplaces.py`) is a code-level registration: its
-query schema, fetch logic, and the plain-text format the admin UI uses for
-its query boxes. Adding a new one means writing a source adapter plus one
-`register(...)` call - nothing in the pipeline, admin routes, or templates
-needs to change.
+fetch logic (how it turns one of a search's phrases into listings) and,
+optionally, auth fields it needs. Adding a new one means writing a source
+adapter plus one `register(...)` call - nothing in the pipeline, admin routes,
+or templates needs to change.
 
 What's *not* code is per-deployment and lives in the admin UI at
 `http://<host>:8000/marketplaces`, one row per registered marketplace:

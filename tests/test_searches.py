@@ -18,7 +18,8 @@ def test_create_and_get_round_trip(conn):
         excluded_models=["*rostskadad*"],
         watched_models=[WatchedModel(pattern="Toyota Hilux*", note="reliable", good_price="80000-120000 SEK")],
         hard_criteria=["4x4", "diesel"],
-        marketplace_queries={"blocket": [{"q": "pickup", "category": "bilar"}]},
+        search_phrases=["pickup"],
+        marketplaces=["blocket"],
     )
     created = searches.create_search(conn, search)
     assert created.id is not None
@@ -27,7 +28,8 @@ def test_create_and_get_round_trip(conn):
     assert fetched.name == "Pickup truck"
     assert fetched.scope == "national"
     assert fetched.watched_models[0].pattern == "Toyota Hilux*"
-    assert fetched.marketplace_queries["blocket"][0]["q"] == "pickup"
+    assert fetched.search_phrases == ["pickup"]
+    assert fetched.marketplaces == ["blocket"]
 
 
 def test_list_enabled_only(conn):

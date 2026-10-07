@@ -1,12 +1,13 @@
 """Marketplace registry: a code-level catalog of the places a search can run.
 
-Each marketplace bundles everything specific to that source - its query
-schema, how to fetch listings for it, how to parse/render its query lines in
-the admin UI's plain-text textareas, and (if it needs one) what auth fields
-it requires. Blocket is the first and currently only entry; adding a new
-marketplace means writing its source adapter plus one `register(...)` call
-here - nothing in pipeline.py, the admin routes, or the templates needs to
-change, since all three are driven by this registry.
+Each marketplace bundles everything specific to that source - how to fetch
+listings for a search phrase, and (if it needs one) what auth fields it
+requires. The search terms, scope/location, and criteria all live on the
+Search object itself (see models.py); a marketplace just decides how to use
+that shared, generic information. Blocket is the first and currently only
+entry; adding a new marketplace means writing its source adapter plus one
+`register(...)` call here - nothing in pipeline.py, the admin routes, or the
+templates needs to change, since all three are driven by this registry.
 
 Polling cadence, request delay, and any auth values are NOT part of this
 code-level registry - those are per-deployment, admin-UI-editable settings
@@ -15,11 +16,9 @@ stored in the `marketplace_configs` table (see marketplace_configs.py).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple, Type
+from typing import Callable, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel
-
-from watcher.models import BlocketQuery, Listing, MarketplaceConfig, Search
+from watcher.models import Listing, MarketplaceConfig, Search
 from watcher.settings import Settings
 from watcher.sources import blocket as blocket_source
 
@@ -35,11 +34,9 @@ class AuthField:
 class Marketplace:
     key: str
     display_name: str
-    query_model: Type[BaseModel]
-    fetch: Callable[..., List[Listing]]  # fetch(query, *, search, config, settings) -> List[Listing]
-    parse_query_line: Callable[[List[str]], Optional[BaseModel]]
-    query_to_line: Callable[[BaseModel], str]
-    query_line_hint: str
+    # fetch(phrase, *, search, config, settings) -> List[Listing] - called
+    # once per entry in search.search_phrases.
+    fetch: Callable[..., List[Listing]]
     auth_fields: Tuple[AuthField, ...] = ()
     default_poll_interval_minutes: int = 240
     default_request_delay_seconds: float = 2.0
@@ -63,23 +60,10 @@ def get(key: str) -> Optional[Marketplace]:
 # --- Blocket -----------------------------------------------------------------
 
 def _blocket_fetch(
-    query: BlocketQuery, *, search: Search, config: MarketplaceConfig, settings: Settings
+    phrase: str, *, search: Search, config: MarketplaceConfig, settings: Settings
 ) -> List[Listing]:
     location = search.location if search.scope == "local" else ""
-    return blocket_source.fetch(query, location=location, max_pages=settings.max_pages_per_query)
-
-
-def _blocket_parse_query_line(parts: List[str]) -> Optional[BlocketQuery]:
-    q = parts[0] if parts else ""
-    if not q:
-        return None
-    category = parts[1] if len(parts) > 1 and parts[1] else None
-    sub_category = parts[2] if len(parts) > 2 and parts[2] else None
-    return BlocketQuery(q=q, category=category, sub_category=sub_category)
-
-
-def _blocket_query_to_line(query: BlocketQuery) -> str:
-    return f"{query.q} | {query.category or ''} | {query.sub_category or ''}"
+    return blocket_source.fetch(phrase, location=location, max_pages=settings.max_pages_per_query)
 
 
 def _blocket_enrich_description(url: str) -> str:
@@ -90,11 +74,7 @@ register(
     Marketplace(
         key="blocket",
         display_name="Blocket",
-        query_model=BlocketQuery,
         fetch=_blocket_fetch,
-        parse_query_line=_blocket_parse_query_line,
-        query_to_line=_blocket_query_to_line,
-        query_line_hint="one per line: q | category | sub_category - category/sub_category optional",
         auth_fields=(),
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,

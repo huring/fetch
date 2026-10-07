@@ -77,7 +77,7 @@ def make_listing(external_id, title, price=1000, description=""):
 def test_run_once_sends_instant_notification_for_high_score():
     conn = make_conn()
     searches.create_search(
-        conn, Search(name="Vardagsrummet AV-receiver", marketplace_queries={"blocket": [{"q": "onkyo"}]})
+        conn, Search(name="Vardagsrummet AV-receiver", search_phrases=["onkyo"], marketplaces=["blocket"])
     )
     responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
 
@@ -96,7 +96,7 @@ def test_run_once_sends_instant_notification_for_high_score():
 
 def test_run_once_skips_searches_without_this_marketplace():
     conn = make_conn()
-    searches.create_search(conn, Search(name="No marketplace yet"))  # marketplace_queries={}
+    searches.create_search(conn, Search(name="No marketplace yet"))  # marketplaces=[]
 
     with patch("watcher.sources.blocket.fetch") as mock_fetch:
         client = make_anthropic_client([])
@@ -113,7 +113,8 @@ def test_run_once_prefilter_excludes_without_calling_claude():
         Search(
             name="Vardagsrummet AV-receiver",
             excluded_words=["trasig"],
-            marketplace_queries={"blocket": [{"q": "onkyo"}]},
+            search_phrases=["onkyo"],
+            marketplaces=["blocket"],
         ),
     )
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Onkyo TX-SR607, trasig")]):
@@ -130,7 +131,7 @@ def test_run_once_prefilter_excludes_without_calling_claude():
 def test_run_once_dry_run_does_not_post_or_mark_notified():
     conn = make_conn()
     searches.create_search(
-        conn, Search(name="Stugan hifi", marketplace_queries={"blocket": [{"q": "leak"}]})
+        conn, Search(name="Stugan hifi", search_phrases=["leak"], marketplaces=["blocket"])
     )
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Leak Stereo 130")]):
         client = make_anthropic_client(
@@ -147,7 +148,7 @@ def test_run_once_dry_run_does_not_post_or_mark_notified():
 def test_run_once_marks_source_failure_and_alerts_after_threshold():
     conn = make_conn()
     searches.create_search(
-        conn, Search(name="C", marketplace_queries={"blocket": [{"q": "x"}]})
+        conn, Search(name="C", search_phrases=["x"], marketplaces=["blocket"])
     )
     settings = make_settings(health_alert_after_n_failures=2)
     client = make_anthropic_client([])
@@ -191,7 +192,7 @@ def test_send_digest_groups_by_search_and_marks_digested():
 def test_run_once_enriches_blocket_description_before_scoring():
     conn = make_conn()
     searches.create_search(
-        conn, Search(name="C", marketplace_queries={"blocket": [{"q": "marantz"}]})
+        conn, Search(name="C", search_phrases=["marantz"], marketplaces=["blocket"])
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Marantz SR5010")]):
@@ -211,7 +212,7 @@ def test_run_once_rejects_after_enrichment_reveals_excluded_word():
     conn = make_conn()
     searches.create_search(
         conn,
-        Search(name="C", excluded_words=["trasig"], marketplace_queries={"blocket": [{"q": "marantz"}]}),
+        Search(name="C", excluded_words=["trasig"], search_phrases=["marantz"], marketplaces=["blocket"]),
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Marantz SR5010")]):
@@ -228,7 +229,7 @@ def test_run_once_rejects_after_enrichment_reveals_excluded_word():
 
 def test_run_marketplace_cycle_marks_fetched():
     conn = make_conn()
-    searches.create_search(conn, Search(name="C", marketplace_queries={"blocket": [{"q": "x"}]}))
+    searches.create_search(conn, Search(name="C", search_phrases=["x"], marketplaces=["blocket"]))
     client = make_anthropic_client([])
 
     with patch("watcher.sources.blocket.fetch", return_value=[]):

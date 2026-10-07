@@ -57,7 +57,8 @@ def test_create_search_via_form(client):
             "hard_criteria": "4x4\ndiesel",
             "soft_criteria": "",
             "watched_models": "Toyota Hilux* | reliable | 80000-120000 SEK",
-            "marketplace_queries__blocket": "pickup | bilar | ",
+            "search_phrases": "pickup",
+            "marketplaces": "blocket",
         },
         follow_redirects=False,
     )

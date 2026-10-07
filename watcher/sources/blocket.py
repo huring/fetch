@@ -23,7 +23,7 @@ import re
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from watcher.models import BlocketQuery, Listing
+from watcher.models import Listing
 from watcher.sources.base import SourceError, get_json, get_text
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,8 @@ DEFAULT_SUB_CATEGORY = "1.93.3906"  # Ljud & Bild
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/120.0"
 
 
-def fetch(query: BlocketQuery, location: str = "", max_pages: int = 2) -> List[Listing]:
-    """Fetch listings for a single Blocket search query.
+def fetch(q: str, location: str = "", max_pages: int = 2) -> List[Listing]:
+    """Fetch listings for a single Blocket search phrase.
 
     The response field names used in ``_parse_ad`` follow the shape documented
     by the `blocket-api` project and several independent scrapers, not an
@@ -49,9 +49,9 @@ def fetch(query: BlocketQuery, location: str = "", max_pages: int = 2) -> List[L
     listings: List[Listing] = []
     for page in range(1, max_pages + 1):
         params = {
-            "q": query.q,
-            "cg": query.category or DEFAULT_CATEGORY,
-            "sc": query.sub_category or DEFAULT_SUB_CATEGORY,
+            "q": q,
+            "cg": DEFAULT_CATEGORY,
+            "sc": DEFAULT_SUB_CATEGORY,
             "sort": "PUBLISHED_DESC",
             "page": page,
         }
@@ -60,7 +60,7 @@ def fetch(query: BlocketQuery, location: str = "", max_pages: int = 2) -> List[L
         try:
             data = get_json(SEARCH_URL, params=params, headers=headers)
         except Exception as exc:
-            raise SourceError(f"Blocket search failed for q={query.q!r}: {exc}") from exc
+            raise SourceError(f"Blocket search failed for q={q!r}: {exc}") from exc
 
         ads = data.get("docs") or data.get("data") or data.get("ads") or []
         if not ads:

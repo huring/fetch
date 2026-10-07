@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -46,36 +46,13 @@ def _watched_models_to_text(items: List[WatchedModel]) -> str:
     return "\n".join(f"{wm.pattern} | {wm.note} | {wm.good_price}" for wm in items)
 
 
-def _parse_marketplace_queries(form_data) -> Dict[str, List[dict]]:
-    result: Dict[str, List[dict]] = {}
-    for key, marketplace in MARKETPLACES.items():
-        text = form_data.get(f"marketplace_queries__{key}", "")
-        queries = []
-        for line in _lines_to_list(text):
-            parts = [p.strip() for p in line.split("|")]
-            parsed = marketplace.parse_query_line(parts)
-            if parsed is not None:
-                queries.append(parsed.model_dump(exclude_none=True))
-        if queries:
-            result[key] = queries
-    return result
-
-
-def _marketplace_queries_to_form(marketplace_queries: Dict[str, List[dict]]) -> Dict[str, str]:
-    result = {}
-    for key, marketplace in MARKETPLACES.items():
-        lines = [marketplace.query_to_line(marketplace.query_model(**raw)) for raw in marketplace_queries.get(key, [])]
-        result[key] = "\n".join(lines)
-    return result
-
-
 def _search_to_form(search: Optional[Search]) -> dict:
     if search is None:
         return dict(
             name="", enabled=True, scope="local", location="", require_shipping=False, max_price="",
             excluded_models="", excluded_words="", required_keywords="",
             hard_criteria="", soft_criteria="", watched_models="",
-            marketplace_queries=_marketplace_queries_to_form({}),
+            search_phrases="", marketplaces=[],
         )
     return dict(
         name=search.name,
@@ -90,12 +67,14 @@ def _search_to_form(search: Optional[Search]) -> dict:
         hard_criteria=_list_to_lines(search.hard_criteria),
         soft_criteria=_list_to_lines(search.soft_criteria),
         watched_models=_watched_models_to_text(search.watched_models),
-        marketplace_queries=_marketplace_queries_to_form(search.marketplace_queries),
+        search_phrases=_list_to_lines(search.search_phrases),
+        marketplaces=search.marketplaces,
     )
 
 
 def _form_to_search(form_data) -> Search:
     max_price = form_data.get("max_price", "")
+    marketplaces = [key for key in form_data.getlist("marketplaces") if key in MARKETPLACES]
     return Search(
         name=form_data.get("name", ""),
         enabled=form_data.get("enabled") is not None,
@@ -109,7 +88,8 @@ def _form_to_search(form_data) -> Search:
         hard_criteria=_lines_to_list(form_data.get("hard_criteria", "")),
         soft_criteria=_lines_to_list(form_data.get("soft_criteria", "")),
         watched_models=_parse_watched_models(form_data.get("watched_models", "")),
-        marketplace_queries=_parse_marketplace_queries(form_data),
+        search_phrases=_lines_to_list(form_data.get("search_phrases", "")),
+        marketplaces=marketplaces,
     )
 
 
