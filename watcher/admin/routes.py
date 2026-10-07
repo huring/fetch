@@ -53,7 +53,7 @@ def _search_to_form(search: Optional[Search]) -> dict:
     if search is None:
         return dict(
             name="", enabled=True, scope="local", location="", require_shipping=False, max_price="",
-            excluded_models="", excluded_words="", required_keywords="",
+            min_price="", excluded_models="", excluded_words="", required_keywords="",
             hard_criteria="", soft_criteria="", watched_models="",
             search_phrases="", marketplaces=[],
         )
@@ -64,6 +64,7 @@ def _search_to_form(search: Optional[Search]) -> dict:
         location=search.location,
         require_shipping=search.require_shipping,
         max_price=search.max_price if search.max_price is not None else "",
+        min_price=search.min_price if search.min_price is not None else "",
         excluded_models=_list_to_lines(search.excluded_models),
         excluded_words=_list_to_lines(search.excluded_words),
         required_keywords=_list_to_lines(search.required_keywords),
@@ -77,6 +78,7 @@ def _search_to_form(search: Optional[Search]) -> dict:
 
 def _form_to_search(form_data) -> Search:
     max_price = form_data.get("max_price", "")
+    min_price = form_data.get("min_price", "")
     marketplaces = [key for key in form_data.getlist("marketplaces") if key in MARKETPLACES]
     return Search(
         name=form_data.get("name", ""),
@@ -85,6 +87,7 @@ def _form_to_search(form_data) -> Search:
         location=form_data.get("location", ""),
         require_shipping=form_data.get("require_shipping") is not None,
         max_price=int(max_price) if max_price.strip() else None,
+        min_price=int(min_price) if min_price.strip() else None,
         excluded_models=_lines_to_list(form_data.get("excluded_models", "")),
         excluded_words=_lines_to_list(form_data.get("excluded_words", "")),
         required_keywords=_lines_to_list(form_data.get("required_keywords", "")),
@@ -251,7 +254,18 @@ def health_page(request: Request):
     conn = request.app.state.conn
     last_run = storage.get_last_run(conn)
     monthly_cost = storage.monthly_cost_summary(conn)
-    return templates.TemplateResponse(request, "health.html", {"last_run": last_run, "monthly_cost": monthly_cost})
+    awaiting_scoring = storage.count_listings_awaiting_scoring(conn)
+    in_progress_scoring = storage.count_listings_in_progress_scoring(conn)
+    return templates.TemplateResponse(
+        request,
+        "health.html",
+        {
+            "last_run": last_run,
+            "monthly_cost": monthly_cost,
+            "awaiting_scoring": awaiting_scoring,
+            "in_progress_scoring": in_progress_scoring,
+        },
+    )
 
 
 @router.post("/health/clear")

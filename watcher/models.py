@@ -29,6 +29,7 @@ class Search(BaseModel):
     location: str = ""
     require_shipping: bool = False
     max_price: Optional[int] = None
+    min_price: Optional[int] = None
     excluded_models: List[str] = Field(default_factory=list)
     excluded_words: List[str] = Field(default_factory=list)
     required_keywords: List[str] = Field(default_factory=list)

@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,6 +22,21 @@ def make_settings(db_path):
         dry_run=True,
         admin_port=8000,
     )
+
+
+@pytest.fixture(autouse=True)
+def no_real_marketplace_fetches():
+    """The admin app's scheduler fires an immediate tick on startup
+    (next_run_time=now) regardless of whether an API key is configured -
+    fetching doesn't need one, only scoring does. Route tests care about the
+    HTTP layer, not live marketplace data, so every source's fetch is
+    stubbed out here rather than relying on a missing API key to prevent
+    real network calls (it no longer does, now that fetch and scoring run
+    independently)."""
+    with patch("watcher.sources.blocket.fetch", return_value=[]), \
+         patch("watcher.sources.vinted.fetch", return_value=[]), \
+         patch("watcher.sources.rehifi.fetch", return_value=[]):
+        yield
 
 
 @pytest.fixture
@@ -127,6 +144,33 @@ def test_create_search_via_form(client):
 
     list_response = client.get("/searches")
     assert "Pickup truck" in list_response.text
+
+
+def test_min_price_round_trips_through_form(client):
+    response = client.post(
+        "/searches/new",
+        data={
+            "name": "GPU hunt min price",
+            "enabled": "on",
+            "scope": "national",
+            "location": "",
+            "max_price": "10000",
+            "min_price": "2000",
+            "search_phrases": "rtx",
+            "marketplaces": "blocket",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    from watcher import searches as searches_repo
+
+    conn = client.app.state.conn
+    search = next(s for s in searches_repo.list_searches(conn) if s.name == "GPU hunt min price")
+    assert search.min_price == 2000
+
+    edit_html = client.get(f"/searches/{search.id}/edit").text
+    assert 'name="min_price" value="2000"' in edit_html
 
 
 def test_watched_model_ideal_flag_round_trips_through_form(client):

@@ -17,14 +17,24 @@ back as a proper marketplace if/when it's needed.
 2. **Dedupe** - seen listings and price history live in SQLite, keyed per
    `(search, source, listing id)`. A price drop on a previously-seen listing
    is treated as new again.
-3. **Prefilter** - deterministic, no AI: max price, excluded model patterns
-   (wildcards), excluded words, required keywords. Runs before anything is
-   sent to Claude.
-4. **Score** - listings that pass the prefilter are batched to Claude
-   (`claude-haiku-4-5` by default) along with that search's hard/soft
-   criteria and watched models. Claude returns a 1-10 score, reasoning, a
-   price assessment, and flags any spec it isn't sure about rather than
-   guessing.
+3. **Prefilter** - deterministic, no AI: price bounds (`max_price`/
+   `min_price`), a search-phrase relevance check (the title/description must
+   mention at least one word from what you actually searched for - catches a
+   marketplace's own search being fuzzy, e.g. a plain "onkyo" search once
+   returning a t-shirt), excluded model patterns (wildcards), excluded words,
+   required keywords. Runs before anything is sent to Claude.
+4. **Score** - listings that pass the prefilter are batched (up to
+   `SCORING_BATCH_SIZE` per search, default 25) and submitted to Claude
+   (`claude-haiku-4-5` by default) via the **Message Batches API** - 50%
+   cheaper per token than a normal call, which is the right trade for an
+   unattended background tool where nobody's waiting on a response (results
+   usually land within minutes, but can take up to 24h - the scheduler picks
+   them up on its own, nothing blocks on this). Each request carries that
+   search's hard/soft criteria and watched models as a cached system prompt
+   (free - and the one place caching meaningfully pays off here, since the
+   poll interval is far longer than any cache TTL) and gets back a 1-10
+   score, brief reasoning, a price assessment, and any spec it isn't sure
+   about rather than guessing.
 5. **Notify** - score >= `SCORE_INSTANT_THRESHOLD` (default 8) goes out on
    Slack immediately. Scores between `SCORE_DIGEST_MIN` (default 5) and the
    instant threshold are batched into one Slack message per day at
@@ -45,11 +55,36 @@ back as a proper marketplace if/when it's needed.
    `SCORE_DIGEST_MIN`) gets a one-time "might be worth a lower offer" Slack
    notice.
 
+## Keeping Claude spend low
+
+A few things work together to keep this cheap enough to run indefinitely
+without thinking about it:
+
+- **Narrower input**: the prefilter's search-phrase relevance check and
+  `min_price` (see above) mean fewer irrelevant listings ever reach Claude in
+  the first place - the single biggest lever, since it cuts both input and
+  output tokens together.
+- **Shorter output**: the prompt asks for one short sentence of reasoning and
+  a few words of price assessment, not an essay - output tokens cost 5x input
+  tokens on Haiku, so this matters more than it looks.
+- **Fewer, bigger calls**: `SCORING_BATCH_SIZE` (default 25) amortizes the
+  fixed per-call overhead (criteria, instructions) over more listings.
+- **The Message Batches API** (see "Score" above): 50% off every token - a
+  good fit here because nothing in this workload needs a synchronous
+  response.
+- **Prompt caching** on the stable per-search part of each request - a
+  smaller win than usual here specifically, since the poll interval is far
+  longer than any cache TTL, so it only pays off within a single scoring
+  sweep (a search with more pending listings than one batch holds).
+
+Actual spend (not an estimate) is in the admin UI at `/health` - monthly
+input/output tokens and dollar cost, logged per completed scoring batch.
+
 ## Searches and the admin UI
 
 Everything you watch for is a **search**: a name, a scope (local/national + a
 location), whether shipping should be required, a deterministic prefilter
-(max price / excluded models / excluded words / required keywords), free-text
+(min/max price / excluded models / excluded words / required keywords), free-text
 hard and soft criteria for Claude's judgment, watched models (wildcard pattern
 + note + rough good price, optionally flagged as a buy-it-now/ideal target -
 see below), and a shared list of search phrases - all stored

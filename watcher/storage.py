@@ -110,6 +110,89 @@ def get_pending_listings(conn: sqlite3.Connection, search_id: int) -> List[sqlit
     ).fetchall()
 
 
+def get_unbatched_pending_listings(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """Every pending listing (score IS NULL) across every search that isn't
+    already part of an in-progress scoring batch - the set the scoring
+    submit sweep (watcher/pipeline.py's submit_pending_scoring) picks up."""
+    return conn.execute(
+        """
+        SELECT listings.* FROM listings
+        WHERE listings.score IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM scoring_batch_items sbi
+              JOIN scoring_batches sb ON sb.id = sbi.batch_id
+              WHERE sbi.listing_id = listings.id AND sb.status = 'in_progress'
+          )
+        """
+    ).fetchall()
+
+
+def create_scoring_batch(conn: sqlite3.Connection, batch_id: str, items: List[tuple]) -> None:
+    """items: an iterable of (custom_id, listing_index, listing_id) tuples,
+    one per listing included in the submitted batch."""
+    conn.execute("INSERT INTO scoring_batches (id, status) VALUES (?, 'in_progress')", (batch_id,))
+    conn.executemany(
+        "INSERT INTO scoring_batch_items (batch_id, custom_id, listing_index, listing_id) VALUES (?, ?, ?, ?)",
+        [(batch_id, custom_id, listing_index, listing_id) for custom_id, listing_index, listing_id in items],
+    )
+    conn.commit()
+
+
+def get_in_progress_batch_ids(conn: sqlite3.Connection) -> List[str]:
+    return [row["id"] for row in conn.execute("SELECT id FROM scoring_batches WHERE status = 'in_progress'").fetchall()]
+
+
+def get_batch_items(conn: sqlite3.Connection, batch_id: str) -> Dict[tuple, int]:
+    rows = conn.execute(
+        "SELECT custom_id, listing_index, listing_id FROM scoring_batch_items WHERE batch_id = ?", (batch_id,)
+    ).fetchall()
+    return {(row["custom_id"], row["listing_index"]): row["listing_id"] for row in rows}
+
+
+def delete_scoring_batch(conn: sqlite3.Connection, batch_id: str) -> None:
+    conn.execute("DELETE FROM scoring_batches WHERE id = ?", (batch_id,))
+    conn.commit()
+
+
+def count_listings_awaiting_scoring(conn: sqlite3.Connection) -> int:
+    """Pending listings (score IS NULL) not yet submitted in a scoring
+    batch - will be picked up by the next submit sweep."""
+    return conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM listings
+        WHERE score IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM scoring_batch_items sbi
+              JOIN scoring_batches sb ON sb.id = sbi.batch_id
+              WHERE sbi.listing_id = listings.id AND sb.status = 'in_progress'
+          )
+        """
+    ).fetchone()["n"]
+
+
+def count_listings_in_progress_scoring(conn: sqlite3.Connection) -> int:
+    """Listings currently submitted in a scoring batch awaiting results."""
+    return conn.execute(
+        """
+        SELECT COUNT(DISTINCT sbi.listing_id) AS n
+        FROM scoring_batch_items sbi
+        JOIN scoring_batches sb ON sb.id = sbi.batch_id
+        WHERE sb.status = 'in_progress'
+        """
+    ).fetchone()["n"]
+
+
+def get_listing_with_search_name(conn: sqlite3.Connection, listing_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT listings.*, searches.name AS search_name
+        FROM listings JOIN searches ON searches.id = listings.search_id
+        WHERE listings.id = ?
+        """,
+        (listing_id,),
+    ).fetchone()
+
+
 def update_description(conn: sqlite3.Connection, listing_id: int, description: str) -> None:
     conn.execute("UPDATE listings SET description = ? WHERE id = ?", (description, listing_id))
     conn.commit()
@@ -378,7 +461,7 @@ def mark_health_alert_sent(conn: sqlite3.Connection, source: str) -> None:
 
 def log_token_usage(
     conn: sqlite3.Connection,
-    run_id: int,
+    run_id: Optional[int],
     model: str,
     input_tokens: int,
     output_tokens: int,

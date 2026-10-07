@@ -20,6 +20,9 @@
         <label>Max price (SEK) <span class="hint">(deterministic filter, applied before any AI scoring)</span>
             <input type="number" name="max_price" value="{{ form.max_price }}">
         </label>
+        <label>Min price (SEK) <span class="hint">(deterministic filter - screens out suspiciously-cheap listings, e.g. a lone accessory rather than the item itself; leave blank for no floor)</span>
+            <input type="number" name="min_price" value="{{ form.min_price }}">
+        </label>
     </fieldset>
 
     <fieldset>

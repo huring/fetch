@@ -49,3 +49,35 @@ def test_passes_when_required_keyword_present_in_description():
     search = make_search(required_keywords=["receiver"])
     ok, _ = passes_prefilter("Onkyo TX-NR656", "Fin receiver", 1000, search)
     assert ok is True
+
+
+def test_fails_on_min_price():
+    search = make_search(min_price=500)
+    ok, reason = passes_prefilter("Onkyo remote control", "", 50, search)
+    assert ok is False
+    assert "min_price" in reason
+
+
+def test_price_none_does_not_fail_min_price():
+    search = make_search(min_price=500)
+    ok, _ = passes_prefilter("Onkyo TX-NR656", "", None, search)
+    assert ok is True
+
+
+def test_fails_when_no_search_phrase_word_present():
+    search = make_search(search_phrases=["onkyo tx-nr"])
+    ok, reason = passes_prefilter("Hoodboyz white/gold tee", "a nice t-shirt", 100, search)
+    assert ok is False
+    assert "search phrases" in reason
+
+
+def test_passes_when_a_search_phrase_word_is_present():
+    search = make_search(search_phrases=["onkyo tx-nr"])
+    ok, _ = passes_prefilter("Onkyo TX-NR656 receiver", "", 2000, search)
+    assert ok is True
+
+
+def test_passes_when_no_search_phrases_set():
+    search = make_search(search_phrases=[])
+    ok, _ = passes_prefilter("Anything at all", "", 2000, search)
+    assert ok is True

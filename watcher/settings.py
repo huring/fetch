@@ -42,7 +42,7 @@ def load_settings() -> Settings:
         score_digest_min=int(os.environ.get("SCORE_DIGEST_MIN", "5")),
         health_alert_after_n_failures=int(os.environ.get("HEALTH_ALERT_AFTER_N_FAILURES", "3")),
         claude_model=os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5"),
-        scoring_batch_size=int(os.environ.get("SCORING_BATCH_SIZE", "10")),
+        scoring_batch_size=int(os.environ.get("SCORING_BATCH_SIZE", "25")),
         max_pages_per_query=int(os.environ.get("MAX_PAGES_PER_QUERY", "2")),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         slack_webhook_url=os.environ.get("SLACK_WEBHOOK_URL", ""),

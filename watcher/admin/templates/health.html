@@ -10,12 +10,23 @@
         Finished: {{ last_run.finished_at }}<br>
         Status: <span class="pill {{ 'on' if last_run.status == 'ok' else 'off' }}">{{ last_run.status }}</span><br>
         Searches processed: {{ last_run.searches_processed }}<br>
-        Listings fetched: {{ last_run.listings_fetched }}, scored: {{ last_run.listings_scored }}
+        Listings fetched: {{ last_run.listings_fetched }}
         {% if last_run.error_message %}<br><span class="muted">Error: {{ last_run.error_message }}</span>{% endif %}
     </p>
     {% else %}
     <p class="muted">No runs yet.</p>
     {% endif %}
+</fieldset>
+<fieldset>
+    <legend>Scoring</legend>
+    <p class="muted">
+        Scoring runs asynchronously via the Claude Batch API, independent of
+        any single fetch run above - see README "Keeping Claude spend low".
+    </p>
+    <p>
+        Awaiting submission: {{ awaiting_scoring }}<br>
+        Submitted, awaiting results: {{ in_progress_scoring }}
+    </p>
 </fieldset>
 <fieldset>
     <legend>Monthly Claude API cost</legend>

@@ -214,3 +214,32 @@ def test_mark_stale_notified(conn, search_id):
 
     row = conn.execute("SELECT stale_notified_at FROM listings WHERE id = ?", (listing_id,)).fetchone()
     assert row["stale_notified_at"] is not None
+
+
+def test_scoring_batch_bookkeeping(conn, search_id):
+    unbatched = storage.upsert_listing(conn, search_id, make_listing(external_id="unbatched"))
+    in_progress = storage.upsert_listing(conn, search_id, make_listing(external_id="in-progress"))
+    scored = storage.upsert_listing(conn, search_id, make_listing(external_id="scored"))
+    storage.mark_scored(conn, scored, 7, "r", [], "p")
+
+    unbatched_ids = {row["id"] for row in storage.get_unbatched_pending_listings(conn)}
+    assert unbatched_ids == {unbatched, in_progress}
+    assert storage.count_listings_awaiting_scoring(conn) == 2
+
+    storage.create_scoring_batch(conn, "batch-1", [("custom-1", 0, in_progress)])
+
+    assert storage.count_listings_awaiting_scoring(conn) == 1
+    assert storage.count_listings_in_progress_scoring(conn) == 1
+    assert storage.get_in_progress_batch_ids(conn) == ["batch-1"]
+    assert storage.get_batch_items(conn, "batch-1") == {("custom-1", 0): in_progress}
+
+    storage.delete_scoring_batch(conn, "batch-1")
+
+    assert storage.get_in_progress_batch_ids(conn) == []
+    assert storage.count_listings_awaiting_scoring(conn) == 2  # back on the unbatched list
+
+
+def test_get_listing_with_search_name(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing())
+    row = storage.get_listing_with_search_name(conn, listing_id)
+    assert row["search_name"] == "Test search"

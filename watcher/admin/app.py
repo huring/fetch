@@ -26,7 +26,7 @@ from watcher import marketplace_configs as marketplace_configs_repo
 from watcher.admin.routes import router
 from watcher.liveness import run_liveness_sweep
 from watcher.marketplaces import MARKETPLACES
-from watcher.pipeline import run_marketplace_cycle, send_digest
+from watcher.pipeline import collect_finished_batches, run_marketplace_cycle, send_digest, submit_pending_scoring
 from watcher.seed import seed_default_searches
 from watcher.settings import Settings, load_settings
 
@@ -59,19 +59,32 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         scheduler = BackgroundScheduler()
 
         def _tick():
-            if client is None:
-                logger.error("ANTHROPIC_API_KEY not configured, skipping tick")
-                return
             now = datetime.datetime.utcnow()
             for key in MARKETPLACES:
                 config = marketplace_configs_repo.get_config(conn, key)
                 if config is None or not _is_due(config, now):
                     continue
                 try:
-                    result = run_marketplace_cycle(conn, client, settings, key, dry_run=settings.dry_run)
+                    result = run_marketplace_cycle(conn, settings, key, dry_run=settings.dry_run)
                     logger.info("Marketplace cycle complete (%s): %s", key, result)
                 except Exception:
                     logger.exception("Marketplace cycle failed for %s", key)
+
+            if client is None:
+                logger.error("ANTHROPIC_API_KEY not configured, skipping scoring submit/collect")
+                return
+            try:
+                submit_result = submit_pending_scoring(conn, client, settings)
+                if submit_result["requests"] > 0:
+                    logger.info("Scoring submit: %s", submit_result)
+            except Exception:
+                logger.exception("Scoring submit failed")
+            try:
+                collect_result = collect_finished_batches(conn, client, settings, dry_run=settings.dry_run)
+                if collect_result["batches_collected"] > 0:
+                    logger.info("Scoring collect: %s", collect_result)
+            except Exception:
+                logger.exception("Scoring collect failed")
 
         def _digest_job():
             try:
@@ -87,14 +100,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 logger.exception("Scheduled liveness sweep failed")
 
         def _run_now(key: str):
-            if client is None:
-                logger.error("ANTHROPIC_API_KEY not configured, cannot run %s manually", key)
-                return
             try:
-                result = run_marketplace_cycle(conn, client, settings, key, dry_run=settings.dry_run)
+                result = run_marketplace_cycle(conn, settings, key, dry_run=settings.dry_run)
                 logger.info("Manually-triggered marketplace run complete (%s): %s", key, result)
             except Exception:
                 logger.exception("Manually-triggered marketplace run failed for %s", key)
+                return
+
+            if client is None:
+                logger.error("ANTHROPIC_API_KEY not configured, cannot submit/collect scoring")
+                return
+            try:
+                submit_result = submit_pending_scoring(conn, client, settings)
+                logger.info("Scoring submit: %s", submit_result)
+                collect_result = collect_finished_batches(conn, client, settings, dry_run=settings.dry_run)
+                logger.info("Scoring collect: %s", collect_result)
+            except Exception:
+                logger.exception("Scoring submit/collect failed after manual run of %s", key)
 
         def trigger_marketplace_run(key: str) -> None:
             # Runs on the scheduler's own thread, same as every other

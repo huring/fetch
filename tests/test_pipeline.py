@@ -1,12 +1,12 @@
+import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import responses
 
 from watcher import db, marketplace_configs, pipeline, searches, storage
 from watcher.models import Search
-from watcher.scoring.claude_scorer import _BatchScoreResponse, _ListingScore
 from watcher.settings import Settings
 
 WEBHOOK = "https://hooks.slack.com/services/T000/B000/XXXX"
@@ -50,12 +50,44 @@ def make_settings(**overrides):
     return Settings(**base)
 
 
+class _FakeBatchesResource:
+    """Minimal fake of client.messages.batches: every submitted batch
+    "completes" immediately (processing_status='ended' from the moment
+    it's created), and each request gets `scores` applied positionally -
+    tests here always submit at most one request per batch, so this
+    mirrors the old single-call `make_anthropic_client(scores)` helper's
+    semantics closely enough to keep tests readable."""
+
+    def __init__(self, scores):
+        self.scores = scores
+        self._requests_by_batch = {}
+        self.create_calls = []
+
+    def create(self, requests):
+        batch_id = f"batch_{len(self._requests_by_batch)}"
+        self._requests_by_batch[batch_id] = requests
+        self.create_calls.append(requests)
+        return SimpleNamespace(id=batch_id, processing_status="ended")
+
+    def retrieve(self, batch_id):
+        return SimpleNamespace(id=batch_id, processing_status="ended")
+
+    def results(self, batch_id):
+        requests = self._requests_by_batch[batch_id]
+        content = [SimpleNamespace(type="text", text=json.dumps({"scores": self.scores}))]
+        message = SimpleNamespace(content=content, usage=SimpleNamespace(input_tokens=100, output_tokens=50))
+        for request in requests:
+            yield SimpleNamespace(
+                custom_id=request["custom_id"],
+                result=SimpleNamespace(type="succeeded", message=message),
+            )
+
+
 def make_anthropic_client(scores):
-    parsed = _BatchScoreResponse(scores=scores)
-    response = SimpleNamespace(parsed_output=parsed, usage=SimpleNamespace(input_tokens=100, output_tokens=50))
-    client = MagicMock()
-    client.messages.parse.return_value = response
-    return client
+    """scores: a list of score dicts (listing_index/score/reasoning/
+    uncertain_specs/price_assessment), applied to every submitted batch
+    request - matches how many listings that request actually covers."""
+    return SimpleNamespace(messages=SimpleNamespace(batches=_FakeBatchesResource(scores)))
 
 
 def make_listing(external_id, title, price=1000, description=""):
@@ -83,7 +115,7 @@ def test_run_once_sends_instant_notification_for_high_score():
 
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Onkyo TX-NR656")]):
         client = make_anthropic_client(
-            [_ListingScore(listing_index=0, score=9, reasoning="great", uncertain_specs=[], price_assessment="good")]
+            [{"listing_index": 0, "score": 9, "reasoning": "great", "uncertain_specs": [], "price_assessment": "good"}]
         )
         result = pipeline.run_once(conn, client, make_settings())
 
@@ -100,7 +132,7 @@ def test_run_once_skips_searches_without_this_marketplace():
 
     with patch("watcher.sources.blocket.fetch") as mock_fetch:
         client = make_anthropic_client([])
-        result = pipeline.run_marketplace_cycle(conn, client, make_settings(), "blocket")
+        result = pipeline.run_once(conn, client, make_settings())
 
     mock_fetch.assert_not_called()
     assert result["searches_processed"] == 0
@@ -122,7 +154,7 @@ def test_run_once_prefilter_excludes_without_calling_claude():
         result = pipeline.run_once(conn, client, make_settings())
 
     assert result["listings_scored"] == 0
-    client.messages.parse.assert_not_called()
+    assert client.messages.batches.create_calls == []
     listing_row = conn.execute("SELECT * FROM listings").fetchone()
     assert listing_row["score"] == 0
 
@@ -135,7 +167,7 @@ def test_run_once_dry_run_does_not_post_or_mark_notified():
     )
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Leak Stereo 130")]):
         client = make_anthropic_client(
-            [_ListingScore(listing_index=0, score=9, reasoning="great", uncertain_specs=[], price_assessment="good")]
+            [{"listing_index": 0, "score": 9, "reasoning": "great", "uncertain_specs": [], "price_assessment": "good"}]
         )
         result = pipeline.run_once(conn, client, make_settings(), dry_run=True)
 
@@ -198,14 +230,14 @@ def test_run_once_enriches_blocket_description_before_scoring():
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Marantz SR5010")]):
         with patch("watcher.sources.blocket.fetch_ad_description", return_value="Fint skick, HDCP 2.2"):
             client = make_anthropic_client(
-                [_ListingScore(listing_index=0, score=7, reasoning="r", uncertain_specs=[], price_assessment="p")]
+                [{"listing_index": 0, "score": 7, "reasoning": "r", "uncertain_specs": [], "price_assessment": "p"}]
             )
             pipeline.run_once(conn, client, make_settings(slack_webhook_url=""))
 
     row = conn.execute("SELECT * FROM listings").fetchone()
     assert row["description"] == "Fint skick, HDCP 2.2"
-    sent_prompt = client.messages.parse.call_args.kwargs["messages"][0]["content"]
-    assert "Fint skick, HDCP 2.2" in sent_prompt
+    sent_request = client.messages.batches.create_calls[0][0]
+    assert "Fint skick, HDCP 2.2" in sent_request["params"]["messages"][0]["content"]
 
 
 def test_run_once_rejects_after_enrichment_reveals_excluded_word():
@@ -221,7 +253,7 @@ def test_run_once_rejects_after_enrichment_reveals_excluded_word():
             result = pipeline.run_once(conn, client, make_settings(slack_webhook_url=""))
 
     assert result["listings_scored"] == 0
-    client.messages.parse.assert_not_called()
+    assert client.messages.batches.create_calls == []
     row = conn.execute("SELECT * FROM listings").fetchone()
     assert row["score"] == 0
     assert row["description"] == "Trasig display, annars ok"
@@ -230,34 +262,146 @@ def test_run_once_rejects_after_enrichment_reveals_excluded_word():
 def test_run_marketplace_cycle_marks_fetched():
     conn = make_conn()
     searches.create_search(conn, Search(name="C", search_phrases=["x"], marketplaces=["blocket"]))
-    client = make_anthropic_client([])
 
     with patch("watcher.sources.blocket.fetch", return_value=[]):
-        pipeline.run_marketplace_cycle(conn, client, make_settings(), "blocket")
+        pipeline.run_marketplace_cycle(conn, make_settings(), "blocket")
 
     config = marketplace_configs.get_config(conn, "blocket")
     assert config.last_fetch_at is not None
 
 
+def test_run_marketplace_cycle_never_touches_claude():
+    """run_marketplace_cycle only fetches/prefilters - scoring happens in
+    submit_pending_scoring/collect_finished_batches, called separately."""
+    conn = make_conn()
+    searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["blocket"]))
+
+    with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Onkyo TX-NR656")]):
+        result = pipeline.run_marketplace_cycle(conn, make_settings(), "blocket")
+
+    assert result["listings_pending_scoring"] == 1
+    listing_row = conn.execute("SELECT * FROM listings").fetchone()
+    assert listing_row["score"] is None  # still pending - not scored by the fetch cycle
+
+
 def test_run_marketplace_cycle_works_for_vinted():
     conn = make_conn()
     searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["vinted"]))
-    client = make_anthropic_client(
-        [_ListingScore(listing_index=0, score=9, reasoning="great", uncertain_specs=[], price_assessment="good")]
-    )
 
     with patch("watcher.sources.vinted.fetch", return_value=[make_listing("1", "Onkyo A-9010", description="x")]):
         with patch("watcher.sources.vinted.fetch_item_description", return_value=""):
-            result = pipeline.run_marketplace_cycle(conn, client, make_settings(slack_webhook_url=""), "vinted")
+            result = pipeline.run_marketplace_cycle(conn, make_settings(slack_webhook_url=""), "vinted")
 
     assert result["searches_processed"] == 1
-    assert result["listings_scored"] == 1
+    assert result["listings_pending_scoring"] == 1
     config = marketplace_configs.get_config(conn, "vinted")
     assert config.last_fetch_at is not None
 
 
 def test_run_marketplace_cycle_unknown_key_raises():
     conn = make_conn()
-    client = make_anthropic_client([])
     with pytest.raises(ValueError):
-        pipeline.run_marketplace_cycle(conn, client, make_settings(), "nonexistent")
+        pipeline.run_marketplace_cycle(conn, make_settings(), "nonexistent")
+
+
+def test_submit_pending_scoring_batches_per_search_chunked():
+    conn = make_conn()
+    search = searches.create_search(
+        conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["blocket"], max_price=None)
+    )
+    for i in range(3):
+        storage.upsert_listing(conn, search.id, make_listing(str(i), f"Onkyo {i}"))
+    client = make_anthropic_client([])
+    settings = make_settings(scoring_batch_size=2)
+
+    result = pipeline.submit_pending_scoring(conn, client, settings)
+
+    assert result["listings_submitted"] == 3
+    assert result["requests"] == 2  # chunked into 2 + 1
+    assert len(storage.get_in_progress_batch_ids(conn)) == 1
+
+
+def test_submit_pending_scoring_noop_when_nothing_pending():
+    conn = make_conn()
+    client = make_anthropic_client([])
+
+    result = pipeline.submit_pending_scoring(conn, client, make_settings())
+
+    assert result == {"listings_submitted": 0, "requests": 0}
+    assert client.messages.batches.create_calls == []
+
+
+def test_submitted_listing_is_not_resubmitted_before_collection():
+    conn = make_conn()
+    search = searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["blocket"]))
+    storage.upsert_listing(conn, search.id, make_listing("1", "Onkyo TX-NR656"))
+    client = make_anthropic_client([])
+
+    pipeline.submit_pending_scoring(conn, client, make_settings())
+    result = pipeline.submit_pending_scoring(conn, client, make_settings())
+
+    assert result["listings_submitted"] == 0  # already in an in-progress batch
+
+
+def test_collect_finished_batches_scores_and_notifies():
+    conn = make_conn()
+    search = searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["blocket"]))
+    storage.upsert_listing(conn, search.id, make_listing("1", "Onkyo TX-NR656"))
+    client = make_anthropic_client(
+        [{"listing_index": 0, "score": 9, "reasoning": "great", "uncertain_specs": [], "price_assessment": "good"}]
+    )
+    pipeline.submit_pending_scoring(conn, client, make_settings())
+
+    with responses.RequestsMock() as rsps:
+        rsps.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+        result = pipeline.collect_finished_batches(conn, client, make_settings())
+        assert len(rsps.calls) == 1
+
+    assert result["batches_collected"] == 1
+    assert result["listings_scored"] == 1
+    assert result["instant_notifications"] == 1
+    assert storage.get_in_progress_batch_ids(conn) == []  # batch cleaned up after collection
+
+    listing_row = conn.execute("SELECT * FROM listings").fetchone()
+    assert listing_row["score"] == 9
+    assert listing_row["notified_instant_at"] is not None
+
+
+def test_collect_finished_batches_leaves_errored_item_pending_for_retry():
+    conn = make_conn()
+    search = searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["blocket"]))
+    storage.upsert_listing(conn, search.id, make_listing("1", "Onkyo TX-NR656"))
+    client = make_anthropic_client([])
+
+    pipeline.submit_pending_scoring(conn, client, make_settings())
+
+    # simulate an errored batch item
+    batch_id = storage.get_in_progress_batch_ids(conn)[0]
+    original_results = client.messages.batches.results
+
+    def errored_results(bid):
+        for r in original_results(bid):
+            yield SimpleNamespace(custom_id=r.custom_id, result=SimpleNamespace(type="errored"))
+
+    client.messages.batches.results = errored_results
+
+    result = pipeline.collect_finished_batches(conn, client, make_settings())
+
+    assert result["listings_errored"] == 1
+    assert result["listings_scored"] == 0
+    listing_row = conn.execute("SELECT * FROM listings").fetchone()
+    assert listing_row["score"] is None  # left pending, retried on the next submit sweep
+
+
+def test_collect_finished_batches_skips_batches_still_in_progress():
+    conn = make_conn()
+    search = searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["blocket"]))
+    storage.upsert_listing(conn, search.id, make_listing("1", "Onkyo TX-NR656"))
+    client = make_anthropic_client([])
+    pipeline.submit_pending_scoring(conn, client, make_settings())
+    client.messages.batches.retrieve = lambda batch_id: SimpleNamespace(id=batch_id, processing_status="in_progress")
+
+    result = pipeline.collect_finished_batches(conn, client, make_settings())
+
+    assert result["batches_collected"] == 0
+    assert len(storage.get_in_progress_batch_ids(conn)) == 1

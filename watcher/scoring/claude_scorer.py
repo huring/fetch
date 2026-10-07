@@ -1,16 +1,24 @@
-"""Batch listing scoring via the Claude API (structured outputs).
+"""Listing scoring via the Claude Message Batches API (structured outputs).
 
-Each call scores a batch of listings from one search against that search's
-criteria. Listings Claude's response doesn't cover (mismatched count, parse
-edge cases) come back as None and are left pending in storage so they're
-retried on the next scheduled run rather than silently dropped.
+Scoring runs asynchronously: watcher/pipeline.py submits one batch request
+per chunk of a search's pending listings, and a later pass collects results
+once Anthropic finishes processing them (usually minutes, up to 24h - see
+submit_pending_scoring/collect_finished_batches in pipeline.py). There's no
+synchronous scoring path any more - this is a scheduled background tool with
+no one waiting on a response, and the Batch API is 50% cheaper per token for
+exactly that kind of workload.
+
+The stable part of each prompt (the search's criteria, watched models,
+instructions) is sent as a cached `system` block - it's identical across
+every chunk scored for the same search, so a search with more pending
+listings than one chunk holds reuses it at a fraction of the cost instead of
+paying full price again for each chunk.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from anthropic import Anthropic
 from pydantic import BaseModel, Field
 
 from watcher.models import ScoreResult, Search
@@ -19,33 +27,103 @@ logger = logging.getLogger(__name__)
 
 HAIKU_INPUT_COST_PER_MTOK = 1.00
 HAIKU_OUTPUT_COST_PER_MTOK = 5.00
+BATCH_DISCOUNT = 0.5  # Message Batches API: 50% off every token, including cache reads/writes
+
+MAX_TOKENS = 4096
 
 
 class _ListingScore(BaseModel):
     listing_index: int
     score: int = Field(ge=1, le=10)
-    reasoning: str
+    reasoning: str = Field(description="One short sentence (under ~20 words) explaining the score.")
     uncertain_specs: List[str] = Field(default_factory=list)
-    price_assessment: str
+    price_assessment: str = Field(description="A few words, e.g. 'fair price' or 'overpriced by ~500 SEK'.")
 
 
 class _BatchScoreResponse(BaseModel):
     scores: List[_ListingScore]
 
 
-def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+def _strict_json_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Converts a pydantic-generated JSON schema into the strict subset the
+    Messages API's structured-output feature (output_config.format) accepts.
+
+    client.messages.parse()'s output_format convenience kwarg does this
+    automatically for a normal call, but Batch API requests are built from
+    raw params (there's no .parse() equivalent for batches), so this mirrors
+    that same conversion independently - implemented locally rather than
+    importing the SDK's own (private, unstable) transform helper.
+    """
+    strict: Dict[str, Any] = {}
+    schema = dict(schema)
+
+    defs = schema.pop("$defs", None)
+    if defs is not None:
+        strict["$defs"] = {name: _strict_json_schema(value) for name, value in defs.items()}
+
+    ref = schema.pop("$ref", None)
+    if ref is not None:
+        strict["$ref"] = ref
+        return strict
+
+    type_ = schema.pop("type", None)
+    any_of = schema.pop("anyOf", None) or schema.pop("oneOf", None)
+    if any_of is not None:
+        strict["anyOf"] = [_strict_json_schema(variant) for variant in any_of]
+    else:
+        strict["type"] = type_
+
+    enum = schema.pop("enum", None)
+    if enum is not None:
+        strict["enum"] = enum
+    description = schema.pop("description", None)
+    if description is not None:
+        strict["description"] = description
+
+    if type_ == "object":
+        strict["properties"] = {
+            key: _strict_json_schema(prop) for key, prop in schema.pop("properties", {}).items()
+        }
+        schema.pop("additionalProperties", None)
+        strict["additionalProperties"] = False
+        required = schema.pop("required", None)
+        if required is not None:
+            strict["required"] = required
+    elif type_ == "array":
+        items = schema.pop("items", None)
+        if items is not None:
+            strict["items"] = _strict_json_schema(items)
+
+    schema.pop("title", None)  # pydantic's own metadata, not needed in the schema
+    # Anything else left over (e.g. pydantic's minimum/maximum for a
+    # Field(ge=..., le=...)) isn't a key the API's schema format supports -
+    # fold it into the description as a hint instead of silently dropping it.
+    if schema:
+        description = strict.get("description")
+        strict["description"] = (
+            (description + "\n\n" if description else "")
+            + "{" + ", ".join(f"{key}: {value}" for key, value in schema.items()) + "}"
+        )
+    return strict
+
+
+_RESPONSE_SCHEMA = _strict_json_schema(_BatchScoreResponse.model_json_schema())
+
+
+def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int, batch: bool = True) -> float:
     if "haiku-4-5" not in model:
         logger.warning(
             "No pricing table entry for model %s; estimating cost using Haiku 4.5 rates", model
         )
-    return (
+    cost = (
         (input_tokens / 1_000_000) * HAIKU_INPUT_COST_PER_MTOK
         + (output_tokens / 1_000_000) * HAIKU_OUTPUT_COST_PER_MTOK
     )
+    return cost * BATCH_DISCOUNT if batch else cost
 
 
-def _build_prompt(search: Search, candidates: List[Dict[str, Any]]) -> str:
-    lines: List[str] = []
+def _build_system_text(search: Search) -> str:
+    lines: List[str] = [f'You are assessing second-hand marketplace listings for the watch list "{search.name}".']
     if search.hard_criteria:
         lines.append("Hard requirements (must satisfy):")
         lines.extend(f"- {c}" for c in search.hard_criteria)
@@ -74,7 +152,14 @@ def _build_prompt(search: Search, candidates: List[Dict[str, Any]]) -> str:
             "If shipping availability is unclear from the listing text, flag it in uncertain_specs "
             "rather than assuming either way."
         )
+    lines.append(
+        "Keep reasoning to one short sentence and price_assessment to a few words - these are for "
+        "quick scanning, not detailed essays."
+    )
+    return "\n".join(lines)
 
+
+def _build_user_text(candidates: List[Dict[str, Any]]) -> str:
     listings_block = []
     for idx, c in enumerate(candidates):
         block = f"[{idx}] title: {c['title']}\nprice: {c['price']}\ndescription: {c['description']}\nurl: {c['url']}"
@@ -83,9 +168,7 @@ def _build_prompt(search: Search, candidates: List[Dict[str, Any]]) -> str:
         listings_block.append(block)
 
     return (
-        f'You are assessing second-hand marketplace listings for the watch list "{search.name}".\n\n'
-        + "\n".join(lines)
-        + f"\n\nThere are exactly {len(candidates)} listings below, indexed [0] to [{len(candidates) - 1}]. "
+        f"There are exactly {len(candidates)} listings below, indexed [0] to [{len(candidates) - 1}]. "
         "Return exactly one result per listing, no more, no fewer. For each, give a score from 1 "
         "(irrelevant/bad match) to 10 (excellent match), brief reasoning, a price assessment, and a list "
         "of any specs you are not certain about from the listing text - never guess a spec you can't "
@@ -94,22 +177,44 @@ def _build_prompt(search: Search, candidates: List[Dict[str, Any]]) -> str:
     )
 
 
-def score_batch(
-    client: Anthropic, model: str, search: Search, candidates: List[Dict[str, Any]]
-) -> Tuple[List[Optional[ScoreResult]], int, int]:
-    """Returns (results, input_tokens, output_tokens). results[i] maps to
-    candidates[i], or None if Claude's response didn't cover that index."""
-    prompt = _build_prompt(search, candidates)
-    response = client.messages.parse(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-        output_format=_BatchScoreResponse,
-    )
+def build_batch_request(
+    custom_id: str, model: str, search: Search, candidates: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """One entry for the `requests` list passed to
+    client.messages.batches.create(...) - scores one chunk (up to
+    settings.scoring_batch_size) of a single search's pending listings."""
+    return {
+        "custom_id": custom_id,
+        "params": {
+            "model": model,
+            "max_tokens": MAX_TOKENS,
+            "system": [
+                {"type": "text", "text": _build_system_text(search), "cache_control": {"type": "ephemeral"}}
+            ],
+            "messages": [{"role": "user", "content": _build_user_text(candidates)}],
+            "output_config": {"format": {"type": "json_schema", "schema": _RESPONSE_SCHEMA}},
+        },
+    }
 
-    results: List[Optional[ScoreResult]] = [None] * len(candidates)
-    for item in response.parsed_output.scores:
-        if 0 <= item.listing_index < len(candidates):
+
+def parse_score_message(content: List[Any], num_candidates: int) -> List[Optional[ScoreResult]]:
+    """Parses a completed batch result's message content (a list of content
+    blocks) into one ScoreResult per candidate index. A candidate the
+    response doesn't cover comes back as None and is retried on the next
+    scoring sweep rather than silently dropped."""
+    results: List[Optional[ScoreResult]] = [None] * num_candidates
+    text = next((block.text for block in content if getattr(block, "type", None) == "text"), None)
+    if text is None:
+        logger.warning("Claude's batch response had no text content block")
+        return results
+    try:
+        parsed = _BatchScoreResponse.model_validate_json(text)
+    except Exception as exc:
+        logger.warning("Could not parse Claude's batch response JSON: %s", exc)
+        return results
+
+    for item in parsed.scores:
+        if 0 <= item.listing_index < num_candidates:
             results[item.listing_index] = ScoreResult(
                 score=item.score,
                 reasoning=item.reasoning,
@@ -119,4 +224,4 @@ def score_batch(
         else:
             logger.warning("Claude returned out-of-range listing_index %s", item.listing_index)
 
-    return results, response.usage.input_tokens, response.usage.output_tokens
+    return results
