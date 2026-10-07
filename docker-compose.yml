@@ -1,0 +1,37 @@
+# Portainer stack definition. Deploy as a Git-based stack with "Polling"
+# auto-update enabled (see README) - Portainer CE can't build from the
+# Dockerfile in a Git stack, so the image must already exist in GHCR (built
+# by the GitHub Actions workflow) before this stack can pull it.
+#
+# Replace <github-owner>/<repo> below with your own, e.g. ghcr.io/larshuring/hifi-agent.
+services:
+  watcher:
+    image: ghcr.io/<github-owner>/hifi-agent:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Europe/Stockholm
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      TRADERA_APP_ID: ${TRADERA_APP_ID}
+      TRADERA_APP_KEY: ${TRADERA_APP_KEY}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      POLL_INTERVAL_MINUTES: ${POLL_INTERVAL_MINUTES:-20}
+      DIGEST_TIME: ${DIGEST_TIME:-08:00}
+      SCORE_INSTANT_THRESHOLD: ${SCORE_INSTANT_THRESHOLD:-8}
+      SCORE_DIGEST_MIN: ${SCORE_DIGEST_MIN:-5}
+      HEALTH_ALERT_AFTER_N_FAILURES: ${HEALTH_ALERT_AFTER_N_FAILURES:-3}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-haiku-4-5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DRY_RUN: ${DRY_RUN:-false}
+    volumes:
+      - watcher_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-m", "watcher.healthcheck"]
+      interval: 1m
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  watcher_data:

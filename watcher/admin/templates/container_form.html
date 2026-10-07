@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit" if is_edit else "New" }} container{% endblock %}
+{% block content %}
+<h1>{{ "Edit" if is_edit else "New" }} container</h1>
+<form method="post" action="{{ action_url }}">
+    <fieldset>
+        <legend>Basics</legend>
+        <label>Name<input type="text" name="name" value="{{ form.name }}" required></label>
+        <label><input type="checkbox" name="enabled" {{ "checked" if form.enabled else "" }} style="width:auto;display:inline;"> Enabled</label>
+        <label>Scope
+            <select name="scope">
+                <option value="local" {{ "selected" if form.scope == "local" else "" }}>Local (restrict to a location)</option>
+                <option value="national" {{ "selected" if form.scope == "national" else "" }}>National (search everywhere)</option>
+            </select>
+        </label>
+        <label>Location <span class="hint">(used to restrict local-scope searches, e.g. a city or region name)</span>
+            <input type="text" name="location" value="{{ form.location }}">
+        </label>
+        <label><input type="checkbox" name="require_shipping" {{ "checked" if form.require_shipping else "" }} style="width:auto;display:inline;"> Require/prefer listings that ship <span class="hint">(mainly relevant for national scope)</span></label>
+        <label>Max price (SEK) <span class="hint">(deterministic filter, applied before any AI scoring)</span>
+            <input type="number" name="max_price" value="{{ form.max_price }}">
+        </label>
+    </fieldset>
+
+    <fieldset>
+        <legend>Deterministic prefilter</legend>
+        <label>Excluded models <span class="hint">(wildcard patterns, one per line, e.g. TX-SR6*)</span>
+            <textarea name="excluded_models">{{ form.excluded_models }}</textarea>
+        </label>
+        <label>Excluded words <span class="hint">(one per line, matched against title/description)</span>
+            <textarea name="excluded_words">{{ form.excluded_words }}</textarea>
+        </label>
+        <label>Required keywords <span class="hint">(one per line; at least one must appear - leave empty to require none)</span>
+            <textarea name="required_keywords">{{ form.required_keywords }}</textarea>
+        </label>
+    </fieldset>
+
+    <fieldset>
+        <legend>Criteria for Claude's scoring</legend>
+        <label>Hard requirements <span class="hint">(one per line, free text, e.g. "HDCP 2.2 passthrough required")</span>
+            <textarea name="hard_criteria">{{ form.hard_criteria }}</textarea>
+        </label>
+        <label>Soft criteria / nice-to-haves <span class="hint">(one per line)</span>
+            <textarea name="soft_criteria">{{ form.soft_criteria }}</textarea>
+        </label>
+        <label>Watched models <span class="hint">(one per line: <code>pattern | note | good price</code>, e.g. <code>TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK</code>)</span>
+            <textarea name="watched_models">{{ form.watched_models }}</textarea>
+        </label>
+    </fieldset>
+
+    <fieldset>
+        <legend>Searches</legend>
+        <label>Blocket queries <span class="hint">(one per line: <code>q | category | sub_category</code> - category/sub_category optional)</span>
+            <textarea name="blocket_queries">{{ form.blocket_queries }}</textarea>
+        </label>
+        <label>Tradera queries <span class="hint">(one per line: <code>query | category_id</code> - category_id optional)</span>
+            <textarea name="tradera_queries">{{ form.tradera_queries }}</textarea>
+        </label>
+    </fieldset>
+
+    <div class="actions">
+        <button type="submit">Save</button>
+        <a class="button secondary" href="/containers">Cancel</a>
+    </div>
+</form>
+{% endblock %}
