@@ -101,8 +101,33 @@ def index() -> RedirectResponse:
 @router.get("/searches", response_class=HTMLResponse)
 def list_searches(request: Request):
     conn = request.app.state.conn
+    settings = request.app.state.settings
     all_searches = searches_repo.list_searches(conn)
-    return templates.TemplateResponse(request, "searches_list.html", {"searches": all_searches})
+    counts = storage.get_search_bucket_counts(conn, settings.score_digest_min, settings.score_instant_threshold)
+    return templates.TemplateResponse(request, "searches_list.html", {"searches": all_searches, "counts": counts})
+
+
+def _age_days(first_seen_at: Optional[str]) -> Optional[int]:
+    if not first_seen_at:
+        return None
+    first_seen = datetime.datetime.strptime(first_seen_at, "%Y-%m-%d %H:%M:%S")
+    return (datetime.datetime.utcnow() - first_seen).days
+
+
+@router.get("/searches/{search_id}/listings", response_class=HTMLResponse)
+def search_listings(request: Request, search_id: int, bucket: str = "found"):
+    conn = request.app.state.conn
+    settings = request.app.state.settings
+    search = searches_repo.get_search(conn, search_id)
+    if search is None or bucket not in storage.BUCKETS:
+        return RedirectResponse("/searches", status_code=303)
+    rows = storage.list_bucket_listings(
+        conn, search_id, bucket, settings.score_digest_min, settings.score_instant_threshold
+    )
+    listings = [dict(row, age_days=_age_days(row["first_seen_at"])) for row in rows]
+    return templates.TemplateResponse(
+        request, "search_listings.html", {"search": search, "bucket": bucket, "listings": listings},
+    )
 
 
 @router.get("/searches/new", response_class=HTMLResponse)

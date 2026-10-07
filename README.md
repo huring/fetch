@@ -33,6 +33,17 @@ proper marketplace if/when it's needed.
    `HEALTH_ALERT_AFTER_N_FAILURES` (default 3) runs in a row, a warning goes
    to Slack. Blocket has no uptime guarantee for this kind of access, so this
    is the early-warning signal that something broke silently.
+7. **Liveness sweep** (once daily, 03:30 local) - every listing Claude has
+   actually scored gets re-checked directly against its own page, not
+   inferred from whether it still turns up in search results (unreliable:
+   both marketplaces sort newest-first, so an old-but-still-unsold listing
+   naturally falls off the fetched pages well before it's actually gone).
+   A listing confirmed gone is recorded into `price_history` (title, final
+   price, score, how long it was active) and removed from the active list.
+   A listing still live after `STALE_AFTER_DAYS` (21, hardcoded in
+   `watcher/liveness.py`) that was ever worth surfacing (score >=
+   `SCORE_DIGEST_MIN`) gets a one-time "might be worth a lower offer" Slack
+   notice.
 
 ## Searches and the admin UI
 
@@ -42,7 +53,7 @@ location), whether shipping should be required, a deterministic prefilter
 hard and soft criteria for Claude's judgment, watched models (wildcard pattern
 + note + rough good price), and a shared list of search phrases - all stored
 once on the search itself, not duplicated per marketplace. A search also
-picks which registered marketplace(s) it runs on (today, just Blocket); each
+picks which registered marketplace(s) it runs on; each
 marketplace decides how to use the search's phrases and other settings (e.g.
 Blocket uses the phrase as its "q" param and the location for local-scope
 searches) rather than storing its own copy of them.
@@ -61,6 +72,19 @@ in the UI, since they default to national/no-location.
 List fields in the form (excluded models, watched models, search phrases, ...)
 are edited as plain text, one entry per line - the format for multi-part
 fields (watched models) is shown as a hint under each field.
+
+The search list shows three counts per search, each a link to the actual
+listings behind it (so you can check what's there without going via Slack):
+
+- **Found** - listings that passed the deterministic prefilter (within the
+  max-price/excluded-model rules), regardless of Claude's score.
+- **Summary** - listings scored in the digest range (`SCORE_DIGEST_MIN` to
+  one below the instant threshold).
+- **Above threshold** - listings scored at or above `SCORE_INSTANT_THRESHOLD`.
+
+All three only count currently-active listings - one confirmed sold/removed
+by the daily liveness sweep (see "How it works" above) disappears from every
+bucket and from the database, not just archived quietly.
 
 ## Marketplaces
 

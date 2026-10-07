@@ -130,3 +130,66 @@ def test_get_last_completed_run_skips_in_progress_run(conn):
 def test_get_last_completed_run_none_when_only_in_progress(conn):
     storage.start_run(conn)
     assert storage.get_last_completed_run(conn) is None
+
+
+def test_bucket_counts(conn, search_id):
+    found = storage.upsert_listing(conn, search_id, make_listing(external_id="found"))
+    summary = storage.upsert_listing(conn, search_id, make_listing(external_id="summary"))
+    threshold = storage.upsert_listing(conn, search_id, make_listing(external_id="threshold"))
+    excluded = storage.upsert_listing(conn, search_id, make_listing(external_id="excluded"))
+
+    storage.mark_scored(conn, found, 3, "r", [], "p")  # below digest_min - "found" only
+    storage.mark_scored(conn, summary, 6, "r", [], "p")
+    storage.mark_scored(conn, threshold, 9, "r", [], "p")
+    storage.mark_prefiltered_out(conn, excluded, "too expensive")
+
+    counts = storage.get_search_bucket_counts(conn, score_digest_min=5, score_instant_threshold=8)
+    assert counts[search_id] == {"found": 3, "summary": 1, "threshold": 1}
+
+
+def test_list_bucket_listings_filters_by_bucket(conn, search_id):
+    low = storage.upsert_listing(conn, search_id, make_listing(external_id="low"))
+    high = storage.upsert_listing(conn, search_id, make_listing(external_id="high"))
+    storage.mark_scored(conn, low, 3, "r", [], "p")
+    storage.mark_scored(conn, high, 9, "r", [], "p")
+
+    found = storage.list_bucket_listings(conn, search_id, "found", score_digest_min=5, score_instant_threshold=8)
+    threshold = storage.list_bucket_listings(conn, search_id, "threshold", score_digest_min=5, score_instant_threshold=8)
+
+    assert {row["id"] for row in found} == {low, high}
+    assert {row["id"] for row in threshold} == {high}
+
+
+def test_get_scored_listings_excludes_pending_and_prefiltered(conn, search_id):
+    pending = storage.upsert_listing(conn, search_id, make_listing(external_id="pending"))
+    excluded = storage.upsert_listing(conn, search_id, make_listing(external_id="excluded"))
+    scored = storage.upsert_listing(conn, search_id, make_listing(external_id="scored"))
+    storage.mark_prefiltered_out(conn, excluded, "too expensive")
+    storage.mark_scored(conn, scored, 7, "r", [], "p")
+
+    rows = storage.get_scored_listings(conn)
+    assert {row["id"] for row in rows} == {scored}
+    assert rows[0]["search_name"] == "Test search"
+
+
+def test_insert_price_history_and_delete_listing(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing(external_id="sold"))
+    storage.mark_scored(conn, listing_id, 7, "r", [], "p")
+    row = conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+
+    storage.insert_price_history(conn, "Test search", row)
+    storage.delete_listing(conn, listing_id)
+
+    assert conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone() is None
+    history = conn.execute("SELECT * FROM price_history").fetchone()
+    assert history["search_name"] == "Test search"
+    assert history["title"] == "Onkyo TX-NR656"
+    assert history["score"] == 7
+
+
+def test_mark_stale_notified(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing())
+    storage.mark_stale_notified(conn, listing_id)
+
+    row = conn.execute("SELECT stale_notified_at FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    assert row["stale_notified_at"] is not None

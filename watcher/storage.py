@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from watcher.models import Listing
 
@@ -162,6 +162,100 @@ def get_pending_digest(conn: sqlite3.Connection, score_min: int, score_max: int)
         """,
         (score_min, score_max),
     ).fetchall()
+
+
+BUCKETS = ("found", "summary", "threshold")
+
+
+def _bucket_predicate(bucket: str, score_digest_min: int, score_instant_threshold: int) -> str:
+    if bucket == "threshold":
+        return f"score >= {score_instant_threshold}"
+    if bucket == "summary":
+        return f"score BETWEEN {score_digest_min} AND {score_instant_threshold - 1}"
+    if bucket == "found":
+        return "score IS NOT NULL AND score != 0"
+    raise ValueError(f"Unknown bucket {bucket!r}")
+
+
+def get_search_bucket_counts(
+    conn: sqlite3.Connection, score_digest_min: int, score_instant_threshold: int
+) -> Dict[int, Dict[str, int]]:
+    """Counts of currently-active (not removed/sold) listings per search, for
+    each of the three admin-UI buckets: "found" (passed the deterministic
+    prefilter, i.e. within max-price/excluded-model thresholds, regardless of
+    score), "summary" (scored in the digest range) and "threshold" (scored at
+    or above the instant-notify threshold)."""
+    rows = conn.execute(
+        f"""
+        SELECT
+            search_id,
+            SUM(CASE WHEN {_bucket_predicate('found', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS found,
+            SUM(CASE WHEN {_bucket_predicate('summary', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS summary,
+            SUM(CASE WHEN {_bucket_predicate('threshold', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS threshold
+        FROM listings
+        GROUP BY search_id
+        """
+    ).fetchall()
+    return {
+        row["search_id"]: {"found": row["found"], "summary": row["summary"], "threshold": row["threshold"]}
+        for row in rows
+    }
+
+
+def list_bucket_listings(
+    conn: sqlite3.Connection, search_id: int, bucket: str, score_digest_min: int, score_instant_threshold: int
+) -> List[sqlite3.Row]:
+    predicate = _bucket_predicate(bucket, score_digest_min, score_instant_threshold)
+    return conn.execute(
+        f"SELECT * FROM listings WHERE search_id = ? AND {predicate} ORDER BY score DESC, first_seen_at DESC",
+        (search_id,),
+    ).fetchall()
+
+
+def get_scored_listings(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """Every listing that was actually scored by Claude (1-10, not pending
+    and not deterministically prefiltered out) across all searches, with its
+    search's name - the set the daily liveness sweep checks. Listings never
+    shown to the user (pending or prefiltered-out) aren't worth the extra
+    request."""
+    return conn.execute(
+        """
+        SELECT listings.*, searches.name AS search_name
+        FROM listings
+        JOIN searches ON searches.id = listings.search_id
+        WHERE listings.score BETWEEN 1 AND 10
+        """
+    ).fetchall()
+
+
+def insert_price_history(conn: sqlite3.Connection, search_name: str, listing_row: sqlite3.Row) -> None:
+    conn.execute(
+        """
+        INSERT INTO price_history (search_name, source, external_id, title, price, lowest_price, score, first_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            search_name,
+            listing_row["source"],
+            listing_row["external_id"],
+            listing_row["title"],
+            listing_row["price"],
+            listing_row["lowest_price"],
+            listing_row["score"],
+            listing_row["first_seen_at"],
+        ),
+    )
+    conn.commit()
+
+
+def delete_listing(conn: sqlite3.Connection, listing_id: int) -> None:
+    conn.execute("DELETE FROM listings WHERE id = ?", (listing_id,))
+    conn.commit()
+
+
+def mark_stale_notified(conn: sqlite3.Connection, listing_id: int) -> None:
+    conn.execute("UPDATE listings SET stale_notified_at = datetime('now') WHERE id = ?", (listing_id,))
+    conn.commit()
 
 
 def mark_digested(conn: sqlite3.Connection, listing_ids: List[int]) -> None:

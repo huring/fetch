@@ -21,8 +21,10 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
+import requests
+
 from watcher.models import Listing
-from watcher.sources.base import SourceError, extract_jsonld_description, get_json, get_text
+from watcher.sources.base import SourceError, extract_jsonld_description, get_json, get_text, page_has_jsonld_block
 
 logger = logging.getLogger(__name__)
 
@@ -142,3 +144,23 @@ def fetch_ad_description(url: str) -> str:
         return ""
 
     return extract_jsonld_description(html)
+
+
+def check_active(url: str) -> bool:
+    """True if an ad is still live, used by the daily liveness sweep (see
+    watcher/liveness.py) to decide whether to drop a listing rather than
+    inferring it from search-result absence, which is unreliable once an ad
+    is old enough to fall off Blocket's newest-first sorted results. A 404
+    means the ad is gone outright (confirmed live, 2026-10); a 200 response
+    missing the expected JSON-LD block is treated the same way."""
+    if not url:
+        return False
+    try:
+        html = get_text(url, headers={"User-Agent": USER_AGENT})
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            return False
+        raise SourceError(f"Could not check Blocket ad liveness for {url}: {exc}") from exc
+    except Exception as exc:
+        raise SourceError(f"Could not check Blocket ad liveness for {url}: {exc}") from exc
+    return page_has_jsonld_block(html)

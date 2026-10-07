@@ -175,6 +175,16 @@ def test_marketplace_queries_migrates_to_search_phrases(tmp_path):
     assert all_searches[0].marketplaces == ["blocket"]
 
 
+def test_stale_notified_at_column_added_to_pre_existing_listings(tmp_path):
+    db_path = str(tmp_path / "pre_stale_column.db")
+    _create_marketplace_queries_schema(db_path)  # listings table predates stale_notified_at too
+
+    conn = db.connect(db_path)
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(listings)")}
+    assert "stale_notified_at" in columns
+
+
 def test_migration_is_idempotent_on_already_migrated_db(tmp_path):
     db_path = str(tmp_path / "fresh.db")
     conn = db.connect(db_path)  # fresh DB, created with new schema directly

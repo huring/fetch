@@ -119,3 +119,29 @@ def test_fetch_ad_description_http_failure_returns_empty():
 
 def test_fetch_ad_description_empty_url_returns_empty():
     assert blocket.fetch_ad_description("") == ""
+
+
+@responses.activate
+def test_check_active_true_when_jsonld_present():
+    html = '<script type="application/ld+json">{"@type": "Product", "name": "x"}</script>'
+    responses.add(responses.GET, AD_URL, body=html, status=200)
+
+    assert blocket.check_active(AD_URL) is True
+
+
+@responses.activate
+def test_check_active_false_on_404():
+    responses.add(responses.GET, AD_URL, status=404)
+
+    assert blocket.check_active(AD_URL) is False
+
+
+@responses.activate
+def test_check_active_false_when_jsonld_missing_on_200():
+    responses.add(responses.GET, AD_URL, body="<html><body>borttagen</body></html>", status=200)
+
+    assert blocket.check_active(AD_URL) is False
+
+
+def test_check_active_empty_url_returns_false():
+    assert blocket.check_active("") is False

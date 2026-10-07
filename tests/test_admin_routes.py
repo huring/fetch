@@ -42,6 +42,67 @@ def test_searches_list_shows_seeded_defaults(client):
     assert "Stugan hifi" in response.text
 
 
+def test_searches_list_shows_bucket_counts(client):
+    from watcher import searches, storage
+    from watcher.models import Listing
+
+    conn = client.app.state.conn
+    search = searches.get_search(conn, searches.list_searches(conn)[0].id)
+    listing_id = storage.upsert_listing(
+        conn, search.id,
+        Listing(
+            source="blocket", external_id="x1", title="Test item", description="",
+            price=100, url="https://example.com/x1", location=None, ships=True,
+            published_at=None, raw={},
+        ),
+    )
+    storage.mark_scored(conn, listing_id, 9, "great", [], "good")
+
+    response = client.get("/searches")
+    assert response.status_code == 200
+    assert f'/searches/{search.id}/listings?bucket=threshold' in response.text
+
+
+def test_search_listings_shows_matching_bucket(client):
+    from watcher import searches, storage
+    from watcher.models import Listing
+
+    conn = client.app.state.conn
+    search = searches.get_search(conn, searches.list_searches(conn)[0].id)
+    listing_id = storage.upsert_listing(
+        conn, search.id,
+        Listing(
+            source="blocket", external_id="x2", title="High score item", description="",
+            price=200, url="https://example.com/x2", location=None, ships=True,
+            published_at=None, raw={},
+        ),
+    )
+    storage.mark_scored(conn, listing_id, 9, "great", [], "good")
+
+    response = client.get(f"/searches/{search.id}/listings?bucket=threshold")
+    assert response.status_code == 200
+    assert "High score item" in response.text
+
+    response_wrong_bucket = client.get(f"/searches/{search.id}/listings?bucket=summary")
+    assert "High score item" not in response_wrong_bucket.text
+
+
+def test_search_listings_invalid_bucket_redirects(client):
+    from watcher import searches
+
+    conn = client.app.state.conn
+    search_id = searches.list_searches(conn)[0].id
+    response = client.get(f"/searches/{search_id}/listings?bucket=nonsense", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/searches"
+
+
+def test_search_listings_unknown_search_redirects(client):
+    response = client.get("/searches/999999/listings", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/searches"
+
+
 def test_create_search_via_form(client):
     response = client.post(
         "/searches/new",

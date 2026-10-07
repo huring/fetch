@@ -78,6 +78,33 @@ def send_digest(webhook_url: str, entries_by_search: Dict[str, List[DigestEntry]
     _post(webhook_url, text)
 
 
+def format_stale_opportunity(
+    search_name: str, title: str, price: Optional[int], url: str, score: int, days_active: int
+) -> str:
+    return (
+        f":hourglass: *Still listed after {days_active} days* - {search_name}\n"
+        f"*<{url}|{title}>* - {_price_str(price)} (scored {score}/10)\n"
+        f"Hasn't sold in a while - might be worth a lower offer."
+    )
+
+
+def send_stale_opportunity(
+    webhook_url: str,
+    search_name: str,
+    title: str,
+    price: Optional[int],
+    url: str,
+    score: int,
+    days_active: int,
+    dry_run: bool = False,
+) -> None:
+    text = format_stale_opportunity(search_name, title, price, url, score, days_active)
+    if dry_run:
+        logger.info("[dry-run] would send stale-opportunity Slack alert:\n%s", text)
+        return
+    _post(webhook_url, text)
+
+
 def send_health_alert(
     webhook_url: str, source: str, consecutive_failures: int, last_error: str, dry_run: bool = False
 ) -> None:

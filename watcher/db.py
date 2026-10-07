@@ -62,8 +62,22 @@ CREATE TABLE IF NOT EXISTS listings (
     price_assessment TEXT,
     notified_instant_at TEXT,
     included_in_digest_at TEXT,
+    stale_notified_at TEXT,
     raw_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(search_id, source, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_name TEXT NOT NULL,
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    price INTEGER,
+    lowest_price INTEGER,
+    score INTEGER,
+    first_seen_at TEXT,
+    removed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS runs (
@@ -193,6 +207,19 @@ def _migrate_marketplace_queries_to_search_phrases(conn: sqlite3.Connection) -> 
     conn.commit()
 
 
+def _migrate_add_stale_notified_at(conn: sqlite3.Connection) -> None:
+    """Adds the stale_notified_at column (daily liveness sweep's "already
+    nudged about this one" flag) to a listings table created before it
+    existed. No-op on a fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "listings" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(listings)")}
+    if "stale_notified_at" not in columns:
+        conn.execute("ALTER TABLE listings ADD COLUMN stale_notified_at TEXT")
+        conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -202,6 +229,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_legacy_names(conn)
     _migrate_blocket_tradera_queries(conn)
     _migrate_marketplace_queries_to_search_phrases(conn)
+    _migrate_add_stale_notified_at(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

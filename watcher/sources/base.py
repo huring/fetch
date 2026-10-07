@@ -50,6 +50,21 @@ def get_text(
 _JSONLD_RE = re.compile(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
 
 
+def page_has_jsonld_block(html: str) -> bool:
+    """True if the page has a parses-successfully schema.org JSON-LD block -
+    the mechanism both Blocket's and Vinted's item detail pages use for a
+    live listing. Used as a liveness signal: a sold/removed listing's page
+    commonly drops this block even when the URL itself still returns 200."""
+    match = _JSONLD_RE.search(html)
+    if not match:
+        return False
+    try:
+        json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
 def extract_jsonld_description(html: str) -> str:
     """Best-effort extraction of the "description" field from an embedded
     schema.org JSON-LD block (``<script type="application/ld+json">``), the

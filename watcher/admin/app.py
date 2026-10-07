@@ -24,6 +24,7 @@ from fastapi import FastAPI
 from watcher import db
 from watcher import marketplace_configs as marketplace_configs_repo
 from watcher.admin.routes import router
+from watcher.liveness import run_liveness_sweep
 from watcher.marketplaces import MARKETPLACES
 from watcher.pipeline import run_marketplace_cycle, send_digest
 from watcher.seed import seed_default_searches
@@ -32,6 +33,8 @@ from watcher.settings import Settings, load_settings
 logger = logging.getLogger(__name__)
 
 TICK_INTERVAL_MINUTES = 5
+LIVENESS_SWEEP_HOUR = 3
+LIVENESS_SWEEP_MINUTE = 30
 
 
 def _is_due(config, now: datetime.datetime) -> bool:
@@ -76,9 +79,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except Exception:
                 logger.exception("Scheduled digest send failed")
 
+        def _liveness_job():
+            try:
+                result = run_liveness_sweep(conn, settings, dry_run=settings.dry_run)
+                logger.info("Liveness sweep complete: %s", result)
+            except Exception:
+                logger.exception("Scheduled liveness sweep failed")
+
         scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
         hour, minute = settings.digest_time.split(":")
         scheduler.add_job(_digest_job, CronTrigger(hour=int(hour), minute=int(minute)))
+        scheduler.add_job(_liveness_job, CronTrigger(hour=LIVENESS_SWEEP_HOUR, minute=LIVENESS_SWEEP_MINUTE))
         scheduler.start()
         app.state.scheduler = scheduler
 

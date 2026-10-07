@@ -45,6 +45,11 @@ class Marketplace:
     # present in the search results themselves (Blocket needs this; a
     # marketplace whose search results are already complete leaves it unset).
     enrich_description: Optional[Callable[[str], str]] = None
+    # Optional: given a listing's url, return whether it's still live. Used
+    # by the daily liveness sweep (watcher/liveness.py) rather than inferring
+    # removal from search-result absence, which is unreliable once a listing
+    # is old enough to fall off a newest-first sorted search.
+    check_active: Optional[Callable[[str], bool]] = None
 
 
 MARKETPLACES: Dict[str, "Marketplace"] = {}
@@ -71,6 +76,10 @@ def _blocket_enrich_description(url: str) -> str:
     return blocket_source.fetch_ad_description(url)
 
 
+def _blocket_check_active(url: str) -> bool:
+    return blocket_source.check_active(url)
+
+
 register(
     Marketplace(
         key="blocket",
@@ -80,6 +89,7 @@ register(
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,
         enrich_description=_blocket_enrich_description,
+        check_active=_blocket_check_active,
     )
 )
 
@@ -97,6 +107,10 @@ def _vinted_enrich_description(url: str) -> str:
     return vinted_source.fetch_item_description(url)
 
 
+def _vinted_check_active(url: str) -> bool:
+    return vinted_source.check_active(url)
+
+
 register(
     Marketplace(
         key="vinted",
@@ -106,5 +120,6 @@ register(
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,
         enrich_description=_vinted_enrich_description,
+        check_active=_vinted_check_active,
     )
 )

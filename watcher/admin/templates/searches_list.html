@@ -5,15 +5,22 @@
 <p class="actions"><a class="button" href="/searches/new">+ New search</a></p>
 <table>
     <thead>
-        <tr><th>Name</th><th>Scope</th><th>Location</th><th>Status</th><th></th></tr>
+        <tr>
+            <th>Name</th><th>Scope</th><th>Location</th><th>Status</th>
+            <th>Found</th><th>Summary</th><th>Above threshold</th><th></th>
+        </tr>
     </thead>
     <tbody>
     {% for s in searches %}
+        {% set c = counts.get(s.id, {}) %}
         <tr>
             <td><a href="/searches/{{ s.id }}/edit">{{ s.name }}</a></td>
             <td>{{ s.scope }}{% if s.require_shipping %} <span class="muted">(shipping required)</span>{% endif %}</td>
             <td>{{ s.location or "-" }}</td>
             <td><span class="pill {{ 'on' if s.enabled else 'off' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span></td>
+            <td><a href="/searches/{{ s.id }}/listings?bucket=found">{{ c.get('found', 0) }}</a></td>
+            <td><a href="/searches/{{ s.id }}/listings?bucket=summary">{{ c.get('summary', 0) }}</a></td>
+            <td><a href="/searches/{{ s.id }}/listings?bucket=threshold">{{ c.get('threshold', 0) }}</a></td>
             <td>
                 <form class="inline" method="post" action="/searches/{{ s.id }}/toggle">
                     <button class="secondary" type="submit">{{ 'Disable' if s.enabled else 'Enable' }}</button>
@@ -24,7 +31,7 @@
             </td>
         </tr>
     {% else %}
-        <tr><td colspan="5" class="muted">No searches yet.</td></tr>
+        <tr><td colspan="8" class="muted">No searches yet.</td></tr>
     {% endfor %}
     </tbody>
 </table>
