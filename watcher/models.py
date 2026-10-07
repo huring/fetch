@@ -28,7 +28,7 @@ class TraderaQuery(BaseModel):
     category_id: Optional[str] = None
 
 
-class Container(BaseModel):
+class Search(BaseModel):
     id: Optional[int] = None
     name: str
     enabled: bool = True

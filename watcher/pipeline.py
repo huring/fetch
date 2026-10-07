@@ -8,9 +8,9 @@ from typing import Any, Dict, List
 
 from anthropic import Anthropic
 
-from watcher import containers as containers_repo
+from watcher import searches as searches_repo
 from watcher import storage
-from watcher.models import Container, Listing
+from watcher.models import Listing, Search
 from watcher.notify import slack
 from watcher.scoring.claude_scorer import estimate_cost_usd, score_batch
 from watcher.scoring.prefilter import passes_prefilter
@@ -21,19 +21,19 @@ from watcher.sources.base import SourceError
 logger = logging.getLogger(__name__)
 
 
-def _filter_by_scope(listings: List[Listing], container: Container) -> List[Listing]:
-    """For local-scope containers, drop listings whose location is known and
+def _filter_by_scope(listings: List[Listing], search: Search) -> List[Listing]:
+    """For local-scope searches, drop listings whose location is known and
     doesn't match - listings with no location info are kept (can't exclude
     what we can't check)."""
-    if container.scope != "local" or not container.location:
+    if search.scope != "local" or not search.location:
         return listings
-    loc = container.location.lower()
+    loc = search.location.lower()
     return [l for l in listings if l.location is None or loc in l.location.lower()]
 
 
 def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dry_run: bool = False) -> Dict[str, Any]:
     run_id = storage.start_run(conn)
-    enabled_containers = containers_repo.list_containers(conn, enabled_only=True)
+    enabled_searches = searches_repo.list_searches(conn, enabled_only=True)
 
     source_stats = {
         "blocket": {"errors": 0, "attempts": 0, "items": 0},
@@ -45,26 +45,26 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
     instant_notifications: List[Dict[str, Any]] = []
 
     try:
-        for container in enabled_containers:
+        for search in enabled_searches:
             listings: List[Listing] = []
 
-            for q in container.blocket_queries:
+            for q in search.blocket_queries:
                 source_stats["blocket"]["attempts"] += 1
-                location = container.location if container.scope == "local" else ""
+                location = search.location if search.scope == "local" else ""
                 try:
                     fetched = blocket.fetch(q, location=location, max_pages=settings.max_pages_per_query)
                     source_stats["blocket"]["items"] += len(fetched)
                     listings.extend(fetched)
                 except SourceError as exc:
-                    logger.error("Blocket fetch failed for container %r: %s", container.name, exc)
+                    logger.error("Blocket fetch failed for search %r: %s", search.name, exc)
                     source_stats["blocket"]["errors"] += 1
                 time.sleep(settings.blocket_request_delay_seconds)
 
-            for q in container.tradera_queries:
+            for q in search.tradera_queries:
                 if not (settings.tradera_app_id and settings.tradera_app_key):
                     logger.warning(
                         "Skipping Tradera query for %r: TRADERA_APP_ID/TRADERA_APP_KEY not configured",
-                        container.name,
+                        search.name,
                     )
                     continue
                 source_stats["tradera"]["attempts"] += 1
@@ -76,19 +76,19 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
                     source_stats["tradera"]["items"] += len(fetched)
                     listings.extend(fetched)
                 except SourceError as exc:
-                    logger.error("Tradera fetch failed for container %r: %s", container.name, exc)
+                    logger.error("Tradera fetch failed for search %r: %s", search.name, exc)
                     source_stats["tradera"]["errors"] += 1
                 time.sleep(settings.tradera_request_delay_seconds)
 
-            listings = _filter_by_scope(listings, container)
+            listings = _filter_by_scope(listings, search)
             total_fetched += len(listings)
             for listing in listings:
-                storage.upsert_listing(conn, container.id, listing)
+                storage.upsert_listing(conn, search.id, listing)
 
-            pending_rows = storage.get_pending_listings(conn, container.id)
+            pending_rows = storage.get_pending_listings(conn, search.id)
             to_score = []
             for row in pending_rows:
-                ok, reason = passes_prefilter(row["title"], row["description"], row["price"], container)
+                ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
                 if not ok:
                     storage.mark_prefiltered_out(conn, row["id"], reason)
                     continue
@@ -105,7 +105,7 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
                         storage.update_description(conn, row["id"], description)
                         row = dict(row)
                         row["description"] = description
-                        ok, reason = passes_prefilter(row["title"], row["description"], row["price"], container)
+                        ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
                         if not ok:
                             storage.mark_prefiltered_out(conn, row["id"], reason)
                             continue
@@ -121,10 +121,10 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
                 ]
                 try:
                     results, input_tokens, output_tokens = score_batch(
-                        client, settings.claude_model, container, candidates
+                        client, settings.claude_model, search, candidates
                     )
                 except Exception as exc:
-                    logger.error("Claude scoring failed for container %r: %s", container.name, exc)
+                    logger.error("Claude scoring failed for search %r: %s", search.name, exc)
                     continue  # rows stay pending (score IS NULL), retried next run
 
                 cost = estimate_cost_usd(settings.claude_model, input_tokens, output_tokens)
@@ -140,7 +140,7 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
                     if result.score >= settings.score_instant_threshold:
                         instant_notifications.append(
                             {
-                                "container_name": container.name,
+                                "search_name": search.name,
                                 "title": row["title"],
                                 "price": row["price"],
                                 "url": row["url"],
@@ -158,7 +158,7 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
             try:
                 slack.send_instant(
                     settings.slack_webhook_url,
-                    notif["container_name"],
+                    notif["search_name"],
                     notif["title"],
                     notif["price"],
                     notif["url"],
@@ -191,14 +191,14 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
             conn,
             run_id,
             status="ok",
-            containers_processed=len(enabled_containers),
+            searches_processed=len(enabled_searches),
             listings_fetched=total_fetched,
             listings_new=total_pending_scored_attempt,
             listings_scored=total_scored,
         )
         return {
             "run_id": run_id,
-            "containers_processed": len(enabled_containers),
+            "searches_processed": len(enabled_searches),
             "listings_fetched": total_fetched,
             "listings_scored": total_scored,
             "instant_notifications": len(instant_notifications),
@@ -215,7 +215,7 @@ def send_digest(conn: sqlite3.Connection, settings: Settings, dry_run: bool = Fa
     grouped: Dict[str, List[slack.DigestEntry]] = {}
     ids: List[int] = []
     for row in rows:
-        grouped.setdefault(row["container_name"], []).append(
+        grouped.setdefault(row["search_name"], []).append(
             (row["title"], row["price"], row["url"], row["score"], row["reasoning"])
         )
         ids.append(row["id"])
@@ -229,4 +229,4 @@ def send_digest(conn: sqlite3.Connection, settings: Settings, dry_run: bool = Fa
     if not dry_run:
         storage.mark_digested(conn, ids)
 
-    return {"entries": len(ids), "containers": len(grouped)}
+    return {"entries": len(ids), "searches": len(grouped)}

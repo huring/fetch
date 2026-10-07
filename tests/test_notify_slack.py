@@ -23,7 +23,7 @@ def test_send_instant_dry_run_does_not_post():
 
 
 @responses.activate
-def test_send_digest_groups_by_container():
+def test_send_digest_groups_by_search():
     responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
 
     entries = {

@@ -1,4 +1,4 @@
-"""Admin UI routes: container CRUD and health status, server-rendered (no JS)."""
+"""Admin UI routes: search CRUD and health status, server-rendered (no JS)."""
 from __future__ import annotations
 
 import datetime
@@ -9,9 +9,9 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from watcher import containers as containers_repo
+from watcher import searches as searches_repo
 from watcher import storage
-from watcher.models import BlocketQuery, Container, TraderaQuery, WatchedModel
+from watcher.models import BlocketQuery, Search, TraderaQuery, WatchedModel
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -75,8 +75,8 @@ def _tradera_queries_to_text(items: List[TraderaQuery]) -> str:
     return "\n".join(f"{q.query} | {q.category_id or ''}" for q in items)
 
 
-def _container_to_form(container: Optional[Container]) -> dict:
-    if container is None:
+def _search_to_form(search: Optional[Search]) -> dict:
+    if search is None:
         return dict(
             name="", enabled=True, scope="local", location="", require_shipping=False, max_price="",
             excluded_models="", excluded_words="", required_keywords="",
@@ -84,24 +84,24 @@ def _container_to_form(container: Optional[Container]) -> dict:
             blocket_queries="", tradera_queries="",
         )
     return dict(
-        name=container.name,
-        enabled=container.enabled,
-        scope=container.scope,
-        location=container.location,
-        require_shipping=container.require_shipping,
-        max_price=container.max_price if container.max_price is not None else "",
-        excluded_models=_list_to_lines(container.excluded_models),
-        excluded_words=_list_to_lines(container.excluded_words),
-        required_keywords=_list_to_lines(container.required_keywords),
-        hard_criteria=_list_to_lines(container.hard_criteria),
-        soft_criteria=_list_to_lines(container.soft_criteria),
-        watched_models=_watched_models_to_text(container.watched_models),
-        blocket_queries=_blocket_queries_to_text(container.blocket_queries),
-        tradera_queries=_tradera_queries_to_text(container.tradera_queries),
+        name=search.name,
+        enabled=search.enabled,
+        scope=search.scope,
+        location=search.location,
+        require_shipping=search.require_shipping,
+        max_price=search.max_price if search.max_price is not None else "",
+        excluded_models=_list_to_lines(search.excluded_models),
+        excluded_words=_list_to_lines(search.excluded_words),
+        required_keywords=_list_to_lines(search.required_keywords),
+        hard_criteria=_list_to_lines(search.hard_criteria),
+        soft_criteria=_list_to_lines(search.soft_criteria),
+        watched_models=_watched_models_to_text(search.watched_models),
+        blocket_queries=_blocket_queries_to_text(search.blocket_queries),
+        tradera_queries=_tradera_queries_to_text(search.tradera_queries),
     )
 
 
-def _form_to_container(
+def _form_to_search(
     name: str,
     enabled: Optional[str],
     scope: str,
@@ -116,8 +116,8 @@ def _form_to_container(
     watched_models: str,
     blocket_queries: str,
     tradera_queries: str,
-) -> Container:
-    return Container(
+) -> Search:
+    return Search(
         name=name,
         enabled=enabled is not None,
         scope=scope,
@@ -137,26 +137,26 @@ def _form_to_container(
 
 @router.get("/", include_in_schema=False)
 def index() -> RedirectResponse:
-    return RedirectResponse("/containers")
+    return RedirectResponse("/searches")
 
 
-@router.get("/containers", response_class=HTMLResponse)
-def list_containers(request: Request):
+@router.get("/searches", response_class=HTMLResponse)
+def list_searches(request: Request):
     conn = request.app.state.conn
-    all_containers = containers_repo.list_containers(conn)
-    return templates.TemplateResponse(request, "containers_list.html", {"containers": all_containers})
+    all_searches = searches_repo.list_searches(conn)
+    return templates.TemplateResponse(request, "searches_list.html", {"searches": all_searches})
 
 
-@router.get("/containers/new", response_class=HTMLResponse)
-def new_container_form(request: Request):
+@router.get("/searches/new", response_class=HTMLResponse)
+def new_search_form(request: Request):
     return templates.TemplateResponse(
-        request, "container_form.html",
-        {"form": _container_to_form(None), "is_edit": False, "action_url": "/containers/new"},
+        request, "search_form.html",
+        {"form": _search_to_form(None), "is_edit": False, "action_url": "/searches/new"},
     )
 
 
-@router.post("/containers/new")
-def create_container(
+@router.post("/searches/new")
+def create_search(
     request: Request,
     name: str = Form(...),
     enabled: Optional[str] = Form(None),
@@ -174,29 +174,29 @@ def create_container(
     tradera_queries: str = Form(""),
 ):
     conn = request.app.state.conn
-    container = _form_to_container(
+    search = _form_to_search(
         name, enabled, scope, location, require_shipping, max_price,
         excluded_models, excluded_words, required_keywords,
         hard_criteria, soft_criteria, watched_models, blocket_queries, tradera_queries,
     )
-    containers_repo.create_container(conn, container)
-    return RedirectResponse("/containers", status_code=303)
+    searches_repo.create_search(conn, search)
+    return RedirectResponse("/searches", status_code=303)
 
 
-@router.get("/containers/{container_id}/edit", response_class=HTMLResponse)
-def edit_container_form(request: Request, container_id: int):
+@router.get("/searches/{search_id}/edit", response_class=HTMLResponse)
+def edit_search_form(request: Request, search_id: int):
     conn = request.app.state.conn
-    container = containers_repo.get_container(conn, container_id)
+    search = searches_repo.get_search(conn, search_id)
     return templates.TemplateResponse(
-        request, "container_form.html",
-        {"form": _container_to_form(container), "is_edit": True, "action_url": f"/containers/{container_id}/edit"},
+        request, "search_form.html",
+        {"form": _search_to_form(search), "is_edit": True, "action_url": f"/searches/{search_id}/edit"},
     )
 
 
-@router.post("/containers/{container_id}/edit")
-def update_container(
+@router.post("/searches/{search_id}/edit")
+def update_search(
     request: Request,
-    container_id: int,
+    search_id: int,
     name: str = Form(...),
     enabled: Optional[str] = Form(None),
     scope: str = Form("local"),
@@ -213,29 +213,29 @@ def update_container(
     tradera_queries: str = Form(""),
 ):
     conn = request.app.state.conn
-    container = _form_to_container(
+    search = _form_to_search(
         name, enabled, scope, location, require_shipping, max_price,
         excluded_models, excluded_words, required_keywords,
         hard_criteria, soft_criteria, watched_models, blocket_queries, tradera_queries,
     )
-    containers_repo.update_container(conn, container_id, container)
-    return RedirectResponse("/containers", status_code=303)
+    searches_repo.update_search(conn, search_id, search)
+    return RedirectResponse("/searches", status_code=303)
 
 
-@router.post("/containers/{container_id}/toggle")
-def toggle_container(request: Request, container_id: int):
+@router.post("/searches/{search_id}/toggle")
+def toggle_search(request: Request, search_id: int):
     conn = request.app.state.conn
-    container = containers_repo.get_container(conn, container_id)
-    if container is not None:
-        containers_repo.set_enabled(conn, container_id, not container.enabled)
-    return RedirectResponse("/containers", status_code=303)
+    search = searches_repo.get_search(conn, search_id)
+    if search is not None:
+        searches_repo.set_enabled(conn, search_id, not search.enabled)
+    return RedirectResponse("/searches", status_code=303)
 
 
-@router.post("/containers/{container_id}/delete")
-def delete_container(request: Request, container_id: int):
+@router.post("/searches/{search_id}/delete")
+def delete_search(request: Request, search_id: int):
     conn = request.app.state.conn
-    containers_repo.delete_container(conn, container_id)
-    return RedirectResponse("/containers", status_code=303)
+    searches_repo.delete_search(conn, search_id)
+    return RedirectResponse("/searches", status_code=303)
 
 
 @router.get("/health", response_class=HTMLResponse)
@@ -252,8 +252,8 @@ def healthz(request: Request) -> JSONResponse:
 
     Looks at the last *completed* run, not just the most recent run row - a
     run can legitimately take several minutes (sequential, rate-limited
-    fetches across every container), and that shouldn't register as
-    unhealthy while it's still in progress.
+    fetches across every search), and that shouldn't register as unhealthy
+    while it's still in progress.
     """
     conn = request.app.state.conn
     settings = request.app.state.settings

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import responses
 
-from watcher import containers, db, pipeline, storage
-from watcher.models import BlocketQuery, Container
+from watcher import db, pipeline, searches, storage
+from watcher.models import BlocketQuery, Search
 from watcher.scoring.claude_scorer import _BatchScoreResponse, _ListingScore
 from watcher.settings import Settings
 
@@ -71,8 +71,8 @@ def make_listing(external_id, title, price=1000, description=""):
 @responses.activate
 def test_run_once_sends_instant_notification_for_high_score():
     conn = db.connect(":memory:")
-    container = containers.create_container(
-        conn, Container(name="Vardagsrummet AV-receiver", blocket_queries=[BlocketQuery(q="onkyo")])
+    search = searches.create_search(
+        conn, Search(name="Vardagsrummet AV-receiver", blocket_queries=[BlocketQuery(q="onkyo")])
     )
     responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
 
@@ -91,9 +91,9 @@ def test_run_once_sends_instant_notification_for_high_score():
 
 def test_run_once_prefilter_excludes_without_calling_claude():
     conn = db.connect(":memory:")
-    container = containers.create_container(
+    search = searches.create_search(
         conn,
-        Container(
+        Search(
             name="Vardagsrummet AV-receiver",
             excluded_words=["trasig"],
             blocket_queries=[BlocketQuery(q="onkyo")],
@@ -112,8 +112,8 @@ def test_run_once_prefilter_excludes_without_calling_claude():
 @responses.activate
 def test_run_once_dry_run_does_not_post_or_mark_notified():
     conn = db.connect(":memory:")
-    containers.create_container(
-        conn, Container(name="Stugan hifi", blocket_queries=[BlocketQuery(q="leak")])
+    searches.create_search(
+        conn, Search(name="Stugan hifi", blocket_queries=[BlocketQuery(q="leak")])
     )
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Leak Stereo 130")]):
         client = make_anthropic_client(
@@ -129,8 +129,8 @@ def test_run_once_dry_run_does_not_post_or_mark_notified():
 
 def test_run_once_marks_source_failure_and_alerts_after_threshold():
     conn = db.connect(":memory:")
-    containers.create_container(
-        conn, Container(name="C", blocket_queries=[BlocketQuery(q="x")])
+    searches.create_search(
+        conn, Search(name="C", blocket_queries=[BlocketQuery(q="x")])
     )
     settings = make_settings(health_alert_after_n_failures=2)
     client = make_anthropic_client([])
@@ -153,12 +153,12 @@ def test_run_once_marks_source_failure_and_alerts_after_threshold():
 
 
 @responses.activate
-def test_send_digest_groups_by_container_and_marks_digested():
+def test_send_digest_groups_by_search_and_marks_digested():
     conn = db.connect(":memory:")
-    container = containers.create_container(conn, Container(name="Stugan hifi"))
+    search = searches.create_search(conn, Search(name="Stugan hifi"))
     listing_id = storage.upsert_listing(
         conn,
-        container.id,
+        search.id,
         make_listing("1", "Leak Stereo 130"),
     )
     storage.mark_scored(conn, listing_id, 6, "nice amp", [], "fair price")
@@ -173,8 +173,8 @@ def test_send_digest_groups_by_container_and_marks_digested():
 
 def test_run_once_enriches_blocket_description_before_scoring():
     conn = db.connect(":memory:")
-    containers.create_container(
-        conn, Container(name="C", blocket_queries=[BlocketQuery(q="marantz")])
+    searches.create_search(
+        conn, Search(name="C", blocket_queries=[BlocketQuery(q="marantz")])
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Marantz SR5010")]):
@@ -192,9 +192,9 @@ def test_run_once_enriches_blocket_description_before_scoring():
 
 def test_run_once_rejects_after_enrichment_reveals_excluded_word():
     conn = db.connect(":memory:")
-    containers.create_container(
+    searches.create_search(
         conn,
-        Container(name="C", excluded_words=["trasig"], blocket_queries=[BlocketQuery(q="marantz")]),
+        Search(name="C", excluded_words=["trasig"], blocket_queries=[BlocketQuery(q="marantz")]),
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Marantz SR5010")]):

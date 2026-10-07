@@ -15,7 +15,7 @@ from anthropic import Anthropic
 
 from watcher import db
 from watcher.pipeline import run_once
-from watcher.seed import seed_default_containers
+from watcher.seed import seed_default_searches
 from watcher.settings import load_settings
 
 
@@ -46,7 +46,7 @@ def main(argv=None) -> int:
             logger.error("ANTHROPIC_API_KEY is required")
             return 1
         conn = db.connect(settings.db_path)
-        seed_default_containers(conn)
+        seed_default_searches(conn)
         client = Anthropic(api_key=settings.anthropic_api_key)
         result = run_once(conn, client, settings, dry_run=dry_run)
         logger.info("Run complete: %s", result)

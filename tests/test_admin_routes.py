@@ -35,21 +35,21 @@ def client(tmp_path):
         yield test_client
 
 
-def test_index_redirects_to_containers(client):
+def test_index_redirects_to_searches(client):
     response = client.get("/", follow_redirects=False)
     assert response.status_code in (301, 302, 303, 307, 308)
-    assert response.headers["location"] == "/containers"
+    assert response.headers["location"] == "/searches"
 
 
-def test_containers_list_shows_seeded_defaults(client):
-    response = client.get("/containers")
+def test_searches_list_shows_seeded_defaults(client):
+    response = client.get("/searches")
     assert response.status_code == 200
     assert "Stugan hifi" in response.text
 
 
-def test_create_container_via_form(client):
+def test_create_search_via_form(client):
     response = client.post(
-        "/containers/new",
+        "/searches/new",
         data={
             "name": "Pickup truck",
             "enabled": "on",
@@ -69,29 +69,29 @@ def test_create_container_via_form(client):
     )
     assert response.status_code == 303
 
-    list_response = client.get("/containers")
+    list_response = client.get("/searches")
     assert "Pickup truck" in list_response.text
 
 
-def test_toggle_and_delete_container(client):
+def test_toggle_and_delete_search(client):
     client.post(
-        "/containers/new",
+        "/searches/new",
         data={"name": "Bokhyllor", "enabled": "on", "scope": "local", "location": "", "max_price": ""},
     )
-    list_html = client.get("/containers").text
+    list_html = client.get("/searches").text
     assert "enabled" in list_html
 
     import re
 
-    match = re.search(r"/containers/(\d+)/edit", list_html)
-    container_id = match.group(1)
+    match = re.search(r"/searches/(\d+)/edit", list_html)
+    search_id = match.group(1)
 
-    client.post(f"/containers/{container_id}/toggle")
-    toggled_html = client.get("/containers").text
+    client.post(f"/searches/{search_id}/toggle")
+    toggled_html = client.get("/searches").text
     assert "disabled" in toggled_html
 
-    client.post(f"/containers/{container_id}/delete")
-    final_html = client.get("/containers").text
+    client.post(f"/searches/{search_id}/delete")
+    final_html = client.get("/searches").text
     assert "Bokhyllor" not in final_html
 
 

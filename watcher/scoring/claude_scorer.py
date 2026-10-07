@@ -1,9 +1,9 @@
 """Batch listing scoring via the Claude API (structured outputs).
 
-Each call scores a batch of listings from one container against that
-container's criteria. Listings Claude's response doesn't cover (mismatched
-count, parse edge cases) come back as None and are left pending in storage so
-they're retried on the next scheduled run rather than silently dropped.
+Each call scores a batch of listings from one search against that search's
+criteria. Listings Claude's response doesn't cover (mismatched count, parse
+edge cases) come back as None and are left pending in storage so they're
+retried on the next scheduled run rather than silently dropped.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from anthropic import Anthropic
 from pydantic import BaseModel, Field
 
-from watcher.models import Container, ScoreResult
+from watcher.models import ScoreResult, Search
 
 logger = logging.getLogger(__name__)
 
@@ -44,19 +44,19 @@ def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> floa
     )
 
 
-def _build_prompt(container: Container, candidates: List[Dict[str, Any]]) -> str:
+def _build_prompt(search: Search, candidates: List[Dict[str, Any]]) -> str:
     lines: List[str] = []
-    if container.hard_criteria:
+    if search.hard_criteria:
         lines.append("Hard requirements (must satisfy):")
-        lines.extend(f"- {c}" for c in container.hard_criteria)
-    if container.soft_criteria:
+        lines.extend(f"- {c}" for c in search.hard_criteria)
+    if search.soft_criteria:
         lines.append("Nice-to-haves (boost score, not disqualifying):")
-        lines.extend(f"- {c}" for c in container.soft_criteria)
-    if container.watched_models:
+        lines.extend(f"- {c}" for c in search.soft_criteria)
+    if search.watched_models:
         lines.append("Specifically watched models (pattern: note, good price):")
-        for wm in container.watched_models:
+        for wm in search.watched_models:
             lines.append(f"- {wm.pattern}: {wm.note} (good price: {wm.good_price or 'n/a'})")
-    if container.require_shipping:
+    if search.require_shipping:
         lines.append(
             "This search is national in scope: prefer/require listings where the seller ships. "
             "If shipping availability is unclear from the listing text, flag it in uncertain_specs "
@@ -69,7 +69,7 @@ def _build_prompt(container: Container, candidates: List[Dict[str, Any]]) -> str
     ]
 
     return (
-        f'You are assessing second-hand marketplace listings for the watch list "{container.name}".\n\n'
+        f'You are assessing second-hand marketplace listings for the watch list "{search.name}".\n\n'
         "Some results are 'wanted' posts from buyers (e.g. Swedish \"Sökes\"/\"Köpes\"), not items actually "
         "for sale - Blocket's API doesn't reliably flag these separately, so score them low/irrelevant "
         "unless this watch list is specifically about buy requests.\n\n"
@@ -84,11 +84,11 @@ def _build_prompt(container: Container, candidates: List[Dict[str, Any]]) -> str
 
 
 def score_batch(
-    client: Anthropic, model: str, container: Container, candidates: List[Dict[str, Any]]
+    client: Anthropic, model: str, search: Search, candidates: List[Dict[str, Any]]
 ) -> Tuple[List[Optional[ScoreResult]], int, int]:
     """Returns (results, input_tokens, output_tokens). results[i] maps to
     candidates[i], or None if Claude's response didn't cover that index."""
-    prompt = _build_prompt(container, candidates)
+    prompt = _build_prompt(search, candidates)
     response = client.messages.parse(
         model=model,
         max_tokens=4096,

@@ -1,7 +1,7 @@
 """Slack notifications via a single incoming webhook.
 
 Two tiers: an instant alert for standout finds, and a once-daily digest for
-everything else above the lower score threshold, grouped by container.
+everything else above the lower score threshold, grouped by search.
 """
 from __future__ import annotations
 
@@ -28,10 +28,10 @@ def _price_str(price: Optional[int]) -> str:
 
 
 def format_instant(
-    container_name: str, title: str, price: Optional[int], url: str, score: int, reasoning: str, price_assessment: str
+    search_name: str, title: str, price: Optional[int], url: str, score: int, reasoning: str, price_assessment: str
 ) -> str:
     return (
-        f":star: *Score {score}/10* - {container_name}\n"
+        f":star: *Score {score}/10* - {search_name}\n"
         f"*<{url}|{title}>* - {_price_str(price)}\n"
         f"{reasoning}\n"
         f"_Price assessment: {price_assessment}_"
@@ -40,7 +40,7 @@ def format_instant(
 
 def send_instant(
     webhook_url: str,
-    container_name: str,
+    search_name: str,
     title: str,
     price: Optional[int],
     url: str,
@@ -49,7 +49,7 @@ def send_instant(
     price_assessment: str,
     dry_run: bool = False,
 ) -> None:
-    text = format_instant(container_name, title, price, url, score, reasoning, price_assessment)
+    text = format_instant(search_name, title, price, url, score, reasoning, price_assessment)
     if dry_run:
         logger.info("[dry-run] would send instant Slack alert:\n%s", text)
         return
@@ -59,19 +59,19 @@ def send_instant(
 DigestEntry = Tuple[str, Optional[int], str, int, str]  # title, price, url, score, reasoning
 
 
-def format_digest(entries_by_container: Dict[str, List[DigestEntry]]) -> str:
+def format_digest(entries_by_search: Dict[str, List[DigestEntry]]) -> str:
     lines = [":clipboard: *Daily digest*"]
-    for container_name, entries in entries_by_container.items():
-        lines.append(f"\n*{container_name}*")
+    for search_name, entries in entries_by_search.items():
+        lines.append(f"\n*{search_name}*")
         for title, price, url, score, reasoning in entries:
             lines.append(f"- *<{url}|{title}>* ({score}/10, {_price_str(price)}) - {reasoning}")
     return "\n".join(lines)
 
 
-def send_digest(webhook_url: str, entries_by_container: Dict[str, List[DigestEntry]], dry_run: bool = False) -> None:
-    if not entries_by_container:
+def send_digest(webhook_url: str, entries_by_search: Dict[str, List[DigestEntry]], dry_run: bool = False) -> None:
+    if not entries_by_search:
         return
-    text = format_digest(entries_by_container)
+    text = format_digest(entries_by_search)
     if dry_run:
         logger.info("[dry-run] would send Slack digest:\n%s", text)
         return

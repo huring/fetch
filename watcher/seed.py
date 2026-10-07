@@ -1,6 +1,6 @@
-"""First-boot seed data: the hifi search containers this project was originally scoped around.
+"""First-boot seed data: the hifi searches this project was originally scoped around.
 
-Only runs if the containers table is empty, so it never overwrites containers
+Only runs if the searches table is empty, so it never overwrites searches
 you've added or edited via the admin UI. Review scope/location on each of
 these after first boot - they default to national/no-location since your
 actual city wasn't known when this was written.
@@ -9,20 +9,20 @@ from __future__ import annotations
 
 import sqlite3
 
-from watcher import containers as containers_repo
-from watcher.models import BlocketQuery, Container, TraderaQuery, WatchedModel
+from watcher import searches as searches_repo
+from watcher.models import BlocketQuery, Search, TraderaQuery, WatchedModel
 
 
-def seed_default_containers(conn: sqlite3.Connection) -> None:
-    if containers_repo.list_containers(conn):
+def seed_default_searches(conn: sqlite3.Connection) -> None:
+    if searches_repo.list_searches(conn):
         return
-    for container in _default_containers():
-        containers_repo.create_container(conn, container)
+    for search in _default_searches():
+        searches_repo.create_search(conn, search)
 
 
-def _default_containers():
+def _default_searches():
     return [
-        Container(
+        Search(
             name="Living room - AV receiver",
             scope="national",
             max_price=3000,
@@ -43,7 +43,7 @@ def _default_containers():
             blocket_queries=[BlocketQuery(q="onkyo tx-nr"), BlocketQuery(q="marantz sr"), BlocketQuery(q="marantz nr")],
             tradera_queries=[TraderaQuery(query="onkyo receiver"), TraderaQuery(query="marantz receiver")],
         ),
-        Container(
+        Search(
             name="Living room - subwoofer",
             scope="national",
             max_price=5000,
@@ -58,7 +58,7 @@ def _default_containers():
             blocket_queries=[BlocketQuery(q="klipsch subwoofer"), BlocketQuery(q="xtz sub")],
             tradera_queries=[TraderaQuery(query="aktiv subwoofer")],
         ),
-        Container(
+        Search(
             name="Living room - front speakers",
             scope="national",
             hard_criteria=[
@@ -97,7 +97,7 @@ def _default_containers():
             ],
             tradera_queries=[TraderaQuery(query="dali oberon"), TraderaQuery(query="wharfedale diamond"), TraderaQuery(query="q acoustics")],
         ),
-        Container(
+        Search(
             name="Living room - center speaker",
             scope="national",
             soft_criteria=[
@@ -108,14 +108,14 @@ def _default_containers():
             blocket_queries=[BlocketQuery(q="centerhögtalare")],
             tradera_queries=[TraderaQuery(query="centerhögtalare")],
         ),
-        Container(
+        Search(
             name="Living room - rear speakers",
             scope="national",
             enabled=False,
             soft_criteria=["Not actively watched - only score 8+ for a major upgrade in a discreet/compact format"],
             blocket_queries=[BlocketQuery(q="bakhögtalare surround")],
         ),
-        Container(
+        Search(
             name="Stugan hifi",
             scope="national",
             hard_criteria=[

@@ -9,7 +9,7 @@
         Started: {{ last_run.started_at }}<br>
         Finished: {{ last_run.finished_at }}<br>
         Status: <span class="pill {{ 'on' if last_run.status == 'ok' else 'off' }}">{{ last_run.status }}</span><br>
-        Containers processed: {{ last_run.containers_processed }}<br>
+        Searches processed: {{ last_run.searches_processed }}<br>
         Listings fetched: {{ last_run.listings_fetched }}, scored: {{ last_run.listings_scored }}
         {% if last_run.error_message %}<br><span class="muted">Error: {{ last_run.error_message }}</span>{% endif %}
     </p>

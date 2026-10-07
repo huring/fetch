@@ -1,7 +1,7 @@
 import pytest
 
-from watcher import containers, db, storage
-from watcher.models import Container, Listing
+from watcher import db, searches, storage
+from watcher.models import Listing, Search
 
 
 @pytest.fixture
@@ -10,8 +10,8 @@ def conn(tmp_path):
 
 
 @pytest.fixture
-def container_id(conn):
-    created = containers.create_container(conn, Container(name="Test container"))
+def search_id(conn):
+    created = searches.create_search(conn, Search(name="Test search"))
     return created.id
 
 
@@ -30,53 +30,53 @@ def make_listing(external_id="abc123", price=1000, source="blocket"):
     )
 
 
-def test_new_listing_is_pending(conn, container_id):
-    listing_id = storage.upsert_listing(conn, container_id, make_listing())
-    pending = storage.get_pending_listings(conn, container_id)
+def test_new_listing_is_pending(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing())
+    pending = storage.get_pending_listings(conn, search_id)
     assert len(pending) == 1
     assert pending[0]["id"] == listing_id
     assert pending[0]["score"] is None
 
 
-def test_same_price_reseen_does_not_reset_score(conn, container_id):
-    listing_id = storage.upsert_listing(conn, container_id, make_listing(price=1000))
+def test_same_price_reseen_does_not_reset_score(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing(price=1000))
     storage.mark_scored(conn, listing_id, 7, "bra skick", [], "rimligt pris")
 
-    storage.upsert_listing(conn, container_id, make_listing(price=1000))
-    pending = storage.get_pending_listings(conn, container_id)
+    storage.upsert_listing(conn, search_id, make_listing(price=1000))
+    pending = storage.get_pending_listings(conn, search_id)
     assert len(pending) == 0  # still scored, not reset
 
 
-def test_price_drop_resets_to_pending(conn, container_id):
-    listing_id = storage.upsert_listing(conn, container_id, make_listing(price=1000))
+def test_price_drop_resets_to_pending(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing(price=1000))
     storage.mark_scored(conn, listing_id, 7, "bra skick", [], "rimligt pris")
 
-    storage.upsert_listing(conn, container_id, make_listing(price=800))
-    pending = storage.get_pending_listings(conn, container_id)
+    storage.upsert_listing(conn, search_id, make_listing(price=800))
+    pending = storage.get_pending_listings(conn, search_id)
     assert len(pending) == 1
     assert pending[0]["price"] == 800
 
 
-def test_higher_price_does_not_reset(conn, container_id):
-    listing_id = storage.upsert_listing(conn, container_id, make_listing(price=1000))
+def test_higher_price_does_not_reset(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing(price=1000))
     storage.mark_scored(conn, listing_id, 7, "bra skick", [], "rimligt pris")
 
-    storage.upsert_listing(conn, container_id, make_listing(price=1200))
-    pending = storage.get_pending_listings(conn, container_id)
+    storage.upsert_listing(conn, search_id, make_listing(price=1200))
+    pending = storage.get_pending_listings(conn, search_id)
     assert len(pending) == 0
 
 
-def test_prefiltered_out_excluded_from_pending(conn, container_id):
-    listing_id = storage.upsert_listing(conn, container_id, make_listing())
+def test_prefiltered_out_excluded_from_pending(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing())
     storage.mark_prefiltered_out(conn, listing_id, "excluded model")
-    pending = storage.get_pending_listings(conn, container_id)
+    pending = storage.get_pending_listings(conn, search_id)
     assert len(pending) == 0
 
 
-def test_digest_queue_respects_score_range_and_instant_exclusion(conn, container_id):
-    low = storage.upsert_listing(conn, container_id, make_listing(external_id="low"))
-    mid = storage.upsert_listing(conn, container_id, make_listing(external_id="mid"))
-    high = storage.upsert_listing(conn, container_id, make_listing(external_id="high"))
+def test_digest_queue_respects_score_range_and_instant_exclusion(conn, search_id):
+    low = storage.upsert_listing(conn, search_id, make_listing(external_id="low"))
+    mid = storage.upsert_listing(conn, search_id, make_listing(external_id="mid"))
+    high = storage.upsert_listing(conn, search_id, make_listing(external_id="high"))
 
     storage.mark_scored(conn, low, 3, "r", [], "p")
     storage.mark_scored(conn, mid, 6, "r", [], "p")

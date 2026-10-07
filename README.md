@@ -1,54 +1,54 @@
 # Secondhand marketplace watcher
 
-Watches Blocket and Tradera for listings matching configurable "search
-containers" (hifi gear, a pickup truck, bookshelves - anything), scores
-candidates against your criteria with Claude, and notifies you on Slack:
-instantly for standout finds, once a day for everything else.
+Watches Blocket and Tradera for listings matching configurable "searches"
+(hifi gear, a pickup truck, bookshelves - anything), scores candidates
+against your criteria with Claude, and notifies you on Slack: instantly for
+standout finds, once a day for everything else.
 
 ## How it works
 
 1. **Fetch** - every `POLL_INTERVAL_MINUTES` (default 20), runs every enabled
-   container's Blocket/Tradera queries sequentially, with a short delay
-   between requests.
+   search's Blocket/Tradera queries sequentially, with a short delay between
+   requests.
 2. **Dedupe** - seen listings and price history live in SQLite, keyed per
-   `(container, source, listing id)`. A price drop on a previously-seen
-   listing is treated as new again.
+   `(search, source, listing id)`. A price drop on a previously-seen listing
+   is treated as new again.
 3. **Prefilter** - deterministic, no AI: max price, excluded model patterns
    (wildcards), excluded words, required keywords. Runs before anything is
    sent to Claude.
 4. **Score** - listings that pass the prefilter are batched to Claude
-   (`claude-haiku-4-5` by default) along with that container's hard/soft
+   (`claude-haiku-4-5` by default) along with that search's hard/soft
    criteria and watched models. Claude returns a 1-10 score, reasoning, a
    price assessment, and flags any spec it isn't sure about rather than
    guessing.
 5. **Notify** - score >= `SCORE_INSTANT_THRESHOLD` (default 8) goes out on
    Slack immediately. Scores between `SCORE_DIGEST_MIN` (default 5) and the
    instant threshold are batched into one Slack message per day at
-   `DIGEST_TIME` (default 08:00, container-local time), grouped by container.
+   `DIGEST_TIME` (default 08:00, local time), grouped by search.
 6. **Health** - if a source errors or returns nothing for
    `HEALTH_ALERT_AFTER_N_FAILURES` (default 3) runs in a row, a warning goes
    to Slack. Blocket and Tradera have no uptime guarantees for this kind of
    access, so this is the early-warning signal that something broke silently.
 
-## Search containers and the admin UI
+## Searches and the admin UI
 
-Everything you watch for is a **container**: a name, a scope (local/national
-+ a location), whether shipping should be required, a deterministic prefilter
+Everything you watch for is a **search**: a name, a scope (local/national + a
+location), whether shipping should be required, a deterministic prefilter
 (max price / excluded models / excluded words / required keywords), free-text
 hard and soft criteria for Claude's judgment, watched models (wildcard pattern
 + note + rough good price), and the actual Blocket/Tradera search queries to
 run.
 
-Containers live in the same SQLite database as everything else and are
-managed entirely through the admin UI at `http://<host>:8000/containers` -
-there are no `searches.yaml`/`criteria.yaml` files to edit on the host. Add a
-container, toggle one off (e.g. once you've found what you needed in "Stugan
-hifi" and don't want to see it anymore), or edit its criteria, all from the
-browser; changes take effect on the next scheduled run with no restart.
+Searches live in the same SQLite database as everything else and are managed
+entirely through the admin UI at `http://<host>:8000/searches` - there are no
+`searches.yaml`/`criteria.yaml` files to edit on the host. Add a search,
+toggle one off (e.g. once you've found what you needed in "Stugan hifi" and
+don't want to see it anymore), or edit its criteria, all from the browser;
+changes take effect on the next scheduled run with no restart.
 
-On first boot (empty database), the app seeds the hifi containers this
-project was originally built around (`watcher/seed.py`) - review their
-scope/location in the UI, since they default to national/no-location.
+On first boot (empty database), the app seeds the hifi searches this project
+was originally built around (`watcher/seed.py`) - review their scope/location
+in the UI, since they default to national/no-location.
 
 List fields in the form (excluded models, watched models, queries, ...) are
 edited as plain text, one entry per line - the format for multi-part fields
@@ -89,7 +89,7 @@ Portainer's polling picks it up on its own schedule. No manual redeploy step.
 ### Backing up `/data`
 
 `/data/watcher.db` (SQLite, in the `watcher_data` named volume) holds
-everything: containers, listing history, run/cost logs. Back it up like any
+everything: searches, listing history, run/cost logs. Back it up like any
 other named volume, e.g.:
 
 ```sh
@@ -158,7 +158,7 @@ Run the full service (admin UI + scheduler) locally:
 
 ```sh
 python -m watcher.main
-# admin UI at http://localhost:8000/containers
+# admin UI at http://localhost:8000/searches
 ```
 
 ## Environment variables

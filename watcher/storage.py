@@ -19,22 +19,22 @@ from typing import List, Optional
 from watcher.models import Listing
 
 
-def upsert_listing(conn: sqlite3.Connection, container_id: int, listing: Listing) -> int:
+def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -> int:
     row = conn.execute(
-        "SELECT id, price, lowest_price FROM listings WHERE container_id = ? AND source = ? AND external_id = ?",
-        (container_id, listing.source, listing.external_id),
+        "SELECT id, price, lowest_price FROM listings WHERE search_id = ? AND source = ? AND external_id = ?",
+        (search_id, listing.source, listing.external_id),
     ).fetchone()
 
     if row is None:
         cursor = conn.execute(
             """
             INSERT INTO listings (
-                container_id, source, external_id, title, description, url,
+                search_id, source, external_id, title, description, url,
                 price, lowest_price, location, ships, raw_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                container_id,
+                search_id,
                 listing.source,
                 listing.external_id,
                 listing.title,
@@ -103,10 +103,10 @@ def upsert_listing(conn: sqlite3.Connection, container_id: int, listing: Listing
     return listing_id
 
 
-def get_pending_listings(conn: sqlite3.Connection, container_id: int) -> List[sqlite3.Row]:
+def get_pending_listings(conn: sqlite3.Connection, search_id: int) -> List[sqlite3.Row]:
     return conn.execute(
-        "SELECT * FROM listings WHERE container_id = ? AND score IS NULL",
-        (container_id,),
+        "SELECT * FROM listings WHERE search_id = ? AND score IS NULL",
+        (search_id,),
     ).fetchall()
 
 
@@ -152,13 +152,13 @@ def mark_notified_instant(conn: sqlite3.Connection, listing_id: int) -> None:
 def get_pending_digest(conn: sqlite3.Connection, score_min: int, score_max: int) -> List[sqlite3.Row]:
     return conn.execute(
         """
-        SELECT listings.*, containers.name AS container_name
+        SELECT listings.*, searches.name AS search_name
         FROM listings
-        JOIN containers ON containers.id = listings.container_id
+        JOIN searches ON searches.id = listings.search_id
         WHERE listings.score BETWEEN ? AND ?
           AND listings.included_in_digest_at IS NULL
           AND listings.notified_instant_at IS NULL
-        ORDER BY containers.name, listings.score DESC
+        ORDER BY searches.name, listings.score DESC
         """,
         (score_min, score_max),
     ).fetchall()
@@ -189,7 +189,7 @@ def finish_run(
     conn: sqlite3.Connection,
     run_id: int,
     status: str,
-    containers_processed: int = 0,
+    searches_processed: int = 0,
     listings_fetched: int = 0,
     listings_new: int = 0,
     listings_scored: int = 0,
@@ -198,11 +198,11 @@ def finish_run(
     conn.execute(
         """
         UPDATE runs SET
-            finished_at = datetime('now'), status = ?, containers_processed = ?,
+            finished_at = datetime('now'), status = ?, searches_processed = ?,
             listings_fetched = ?, listings_new = ?, listings_scored = ?, error_message = ?
         WHERE id = ?
         """,
-        (status, containers_processed, listings_fetched, listings_new, listings_scored, error_message, run_id),
+        (status, searches_processed, listings_fetched, listings_new, listings_scored, error_message, run_id),
     )
     conn.commit()
 

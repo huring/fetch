@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from watcher import db
 from watcher.admin.routes import router
 from watcher.pipeline import run_once, send_digest
-from watcher.seed import seed_default_containers
+from watcher.seed import seed_default_searches
 from watcher.settings import Settings, load_settings
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         conn = db.connect(settings.db_path)
-        seed_default_containers(conn)
+        seed_default_searches(conn)
         client = Anthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else None
         app.state.conn = conn
         app.state.settings = settings

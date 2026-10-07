@@ -1,6 +1,6 @@
 """Deployment-level settings, read from environment variables.
 
-Distinct from search containers (which live in the DB and are edited via the
+Distinct from searches (which live in the DB and are edited via the
 admin UI): these are operational knobs set once at deploy time in the
 Portainer stack.
 """
