@@ -41,7 +41,7 @@ class Settings:
 def load_settings() -> Settings:
     return Settings(
         db_path=os.environ.get("DB_PATH", "/data/watcher.db"),
-        poll_interval_minutes=int(os.environ.get("POLL_INTERVAL_MINUTES", "20")),
+        poll_interval_minutes=int(os.environ.get("POLL_INTERVAL_MINUTES", "240")),
         digest_time=os.environ.get("DIGEST_TIME", "08:00"),
         score_instant_threshold=int(os.environ.get("SCORE_INSTANT_THRESHOLD", "8")),
         score_digest_min=int(os.environ.get("SCORE_DIGEST_MIN", "5")),

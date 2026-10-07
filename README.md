@@ -7,7 +7,7 @@ standout finds, once a day for everything else.
 
 ## How it works
 
-1. **Fetch** - every `POLL_INTERVAL_MINUTES` (default 20), runs every enabled
+1. **Fetch** - every `POLL_INTERVAL_MINUTES` (default 240, i.e. every 4 hours), runs every enabled
    search's Blocket/Tradera queries sequentially, with a short delay between
    requests.
 2. **Dedupe** - seen listings and price history live in SQLite, keyed per
