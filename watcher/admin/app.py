@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -56,71 +57,92 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         app.state.conn = conn
         app.state.settings = settings
 
+        # Background jobs (tick, digest, liveness sweep, manually-triggered
+        # runs) get their own connection, separate from the one HTTP routes
+        # use - a bare sqlite3.Connection isn't safe for genuinely concurrent
+        # use from multiple threads even with check_same_thread=False (that
+        # flag only disables a safety check, it doesn't add thread-safety),
+        # and more than one of these jobs can legitimately fire at once (e.g.
+        # two "Run now" clicks, or a scheduled tick overlapping with one).
+        # scheduler_lock then serializes the jobs sharing scheduler_conn
+        # against each other; two *separate* sqlite3.Connection objects in
+        # WAL mode (this one and the HTTP routes' conn) can safely be used
+        # concurrently from different threads, which a single shared
+        # Connection object cannot.
+        scheduler_conn = db.connect(settings.db_path)
+        scheduler_lock = threading.Lock()
+
         scheduler = BackgroundScheduler()
 
         def _tick():
-            now = datetime.datetime.utcnow()
-            for key in MARKETPLACES:
-                config = marketplace_configs_repo.get_config(conn, key)
-                if config is None or not _is_due(config, now):
-                    continue
-                try:
-                    result = run_marketplace_cycle(conn, settings, key, dry_run=settings.dry_run)
-                    logger.info("Marketplace cycle complete (%s): %s", key, result)
-                except Exception:
-                    logger.exception("Marketplace cycle failed for %s", key)
+            with scheduler_lock:
+                now = datetime.datetime.utcnow()
+                for key in MARKETPLACES:
+                    config = marketplace_configs_repo.get_config(scheduler_conn, key)
+                    if config is None or not _is_due(config, now):
+                        continue
+                    try:
+                        result = run_marketplace_cycle(scheduler_conn, settings, key, dry_run=settings.dry_run)
+                        logger.info("Marketplace cycle complete (%s): %s", key, result)
+                    except Exception:
+                        logger.exception("Marketplace cycle failed for %s", key)
 
-            if client is None:
-                logger.error("ANTHROPIC_API_KEY not configured, skipping scoring submit/collect")
-                return
-            try:
-                submit_result = submit_pending_scoring(conn, client, settings)
-                if submit_result["requests"] > 0:
-                    logger.info("Scoring submit: %s", submit_result)
-            except Exception:
-                logger.exception("Scoring submit failed")
-            try:
-                collect_result = collect_finished_batches(conn, client, settings, dry_run=settings.dry_run)
-                if collect_result["batches_collected"] > 0:
-                    logger.info("Scoring collect: %s", collect_result)
-            except Exception:
-                logger.exception("Scoring collect failed")
+                if client is None:
+                    logger.error("ANTHROPIC_API_KEY not configured, skipping scoring submit/collect")
+                    return
+                try:
+                    submit_result = submit_pending_scoring(scheduler_conn, client, settings)
+                    if submit_result["requests"] > 0:
+                        logger.info("Scoring submit: %s", submit_result)
+                except Exception:
+                    logger.exception("Scoring submit failed")
+                try:
+                    collect_result = collect_finished_batches(scheduler_conn, client, settings, dry_run=settings.dry_run)
+                    if collect_result["batches_collected"] > 0:
+                        logger.info("Scoring collect: %s", collect_result)
+                except Exception:
+                    logger.exception("Scoring collect failed")
 
         def _digest_job():
-            try:
-                send_digest(conn, settings, dry_run=settings.dry_run)
-            except Exception:
-                logger.exception("Scheduled digest send failed")
+            with scheduler_lock:
+                try:
+                    send_digest(scheduler_conn, settings, dry_run=settings.dry_run)
+                except Exception:
+                    logger.exception("Scheduled digest send failed")
 
         def _liveness_job():
-            try:
-                result = run_liveness_sweep(conn, settings, dry_run=settings.dry_run)
-                logger.info("Liveness sweep complete: %s", result)
-            except Exception:
-                logger.exception("Scheduled liveness sweep failed")
+            with scheduler_lock:
+                try:
+                    result = run_liveness_sweep(scheduler_conn, settings, dry_run=settings.dry_run)
+                    logger.info("Liveness sweep complete: %s", result)
+                except Exception:
+                    logger.exception("Scheduled liveness sweep failed")
 
         def _run_now(key: str):
-            try:
-                result = run_marketplace_cycle(conn, settings, key, dry_run=settings.dry_run)
-                logger.info("Manually-triggered marketplace run complete (%s): %s", key, result)
-            except Exception:
-                logger.exception("Manually-triggered marketplace run failed for %s", key)
-                return
+            with scheduler_lock:
+                try:
+                    result = run_marketplace_cycle(scheduler_conn, settings, key, dry_run=settings.dry_run)
+                    logger.info("Manually-triggered marketplace run complete (%s): %s", key, result)
+                except Exception:
+                    logger.exception("Manually-triggered marketplace run failed for %s", key)
+                    return
 
-            if client is None:
-                logger.error("ANTHROPIC_API_KEY not configured, cannot submit/collect scoring")
-                return
-            try:
-                submit_result = submit_pending_scoring(conn, client, settings)
-                logger.info("Scoring submit: %s", submit_result)
-                collect_result = collect_finished_batches(conn, client, settings, dry_run=settings.dry_run)
-                logger.info("Scoring collect: %s", collect_result)
-            except Exception:
-                logger.exception("Scoring submit/collect failed after manual run of %s", key)
+                if client is None:
+                    logger.error("ANTHROPIC_API_KEY not configured, cannot submit/collect scoring")
+                    return
+                try:
+                    submit_result = submit_pending_scoring(scheduler_conn, client, settings)
+                    logger.info("Scoring submit: %s", submit_result)
+                    collect_result = collect_finished_batches(scheduler_conn, client, settings, dry_run=settings.dry_run)
+                    logger.info("Scoring collect: %s", collect_result)
+                except Exception:
+                    logger.exception("Scoring submit/collect failed after manual run of %s", key)
 
         def trigger_marketplace_run(key: str) -> None:
             # Runs on the scheduler's own thread, same as every other
             # scheduled job - never blocks the request that triggered it.
+            # scheduler_lock means a run triggered while another job is in
+            # progress queues up and runs right after, rather than racing it.
             scheduler.add_job(_run_now, args=[key], next_run_time=datetime.datetime.now())
 
         scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
@@ -135,6 +157,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         scheduler.shutdown(wait=False)
         conn.close()
+        scheduler_conn.close()
 
     app = FastAPI(title="Watcher admin", lifespan=lifespan)
     app.include_router(router)
