@@ -3,11 +3,11 @@
 Watches secondhand marketplaces for listings matching configurable "searches"
 (hifi gear, a pickup truck, bookshelves - anything), scores candidates
 against your criteria with Claude, and notifies you on Slack: instantly for
-standout finds, once a day for everything else. Blocket and Vinted are
-currently registered; more can be added without touching the pipeline, admin
-routes, or templates (see "Marketplaces" below). Tradera support existed
-early on and was removed rather than left half-wired - it'll come back as a
-proper marketplace if/when it's needed.
+standout finds, once a day for everything else. Blocket, Vinted and Rehifi
+are currently registered; more can be added without touching the pipeline,
+admin routes, or templates (see "Marketplaces" below). Tradera support
+existed early on and was removed rather than left half-wired - it'll come
+back as a proper marketplace if/when it's needed.
 
 ## How it works
 
@@ -206,6 +206,31 @@ docker run --rm -v watcher_data:/data -v "$PWD":/backup alpine \
   but in the seller's own listing currency (not SEK) - the enrichment only
   ever reads the description field, never the price, to avoid silently
   mixing currencies.
+- **Rehifi is a single online store, not a classifieds marketplace** - used/
+  refurbished hifi gear, one seller, ships nationally. It has no search
+  concept of "location". Its own search endpoint is explicitly disallowed by
+  `robots.txt` (confirmed live, 2026-10), so `watcher/sources/rehifi.py`
+  doesn't use it - instead it follows the sitemap robots.txt itself points
+  crawlers at (`/product/*` and the sitemap are both allowed), matching a
+  search phrase against product URL slugs (the product name is in the URL)
+  before fetching only the matching product pages for price/stock/
+  description, read from the page's own schema.org JSON-LD and description
+  markup. The ~28k-URL product sitemap (current stock and years of
+  sold/archived history alike) is cached in-process for 24h rather than
+  re-crawled every poll cycle.
+- **Every Rehifi listing gets a standing note in Claude's scoring prompt**
+  that it includes 3 months warranty, 30-day exchange and 10-day right of
+  return (confirmed live in the site's own product-page copy), so a good
+  Rehifi deal should score higher / read as a better deal than an
+  equivalent-price private listing with no such protection. This uses a
+  generic per-marketplace `scoring_note` mechanism (`marketplaces.py`) rather
+  than a Rehifi-specific code path - Blocket's "wanted post" instruction
+  (above) now uses the same mechanism instead of being hardcoded into every
+  prompt regardless of marketplace.
+- **A sold Rehifi item's page stays up** (moved to an internal "archive"
+  category) rather than 404ing like a removed Blocket/Vinted listing - so its
+  liveness is read from the JSON-LD offer's `availability` field
+  (`InStock`/`OutOfStock`), not from the page merely existing.
 
 ## Local development
 

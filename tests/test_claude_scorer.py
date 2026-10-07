@@ -64,6 +64,26 @@ def test_score_batch_ignores_out_of_range_index():
     assert results == [None]
 
 
+def test_score_batch_includes_source_note_in_prompt_when_present():
+    search = Search(name="Test")
+    candidates = [
+        {"title": "A", "description": "", "price": 100, "url": "u", "source_note": "comes with warranty"},
+        {"title": "B", "description": "", "price": 200, "url": "u2"},
+    ]
+    client = make_client(
+        [
+            _ListingScore(listing_index=0, score=5, reasoning="r", uncertain_specs=[], price_assessment="p"),
+            _ListingScore(listing_index=1, score=5, reasoning="r", uncertain_specs=[], price_assessment="p"),
+        ]
+    )
+
+    score_batch(client, "claude-haiku-4-5", search, candidates)
+
+    sent_prompt = client.messages.parse.call_args.kwargs["messages"][0]["content"]
+    assert "comes with warranty" in sent_prompt
+    assert sent_prompt.count("note:") == 1  # only the first candidate has a source_note
+
+
 def test_estimate_cost_usd_haiku_rates():
     cost = estimate_cost_usd("claude-haiku-4-5", input_tokens=1_000_000, output_tokens=1_000_000)
     assert round(cost, 2) == 6.00

@@ -63,16 +63,15 @@ def _build_prompt(search: Search, candidates: List[Dict[str, Any]]) -> str:
             "rather than assuming either way."
         )
 
-    listings_block = [
-        f"[{idx}] title: {c['title']}\nprice: {c['price']}\ndescription: {c['description']}\nurl: {c['url']}"
-        for idx, c in enumerate(candidates)
-    ]
+    listings_block = []
+    for idx, c in enumerate(candidates):
+        block = f"[{idx}] title: {c['title']}\nprice: {c['price']}\ndescription: {c['description']}\nurl: {c['url']}"
+        if c.get("source_note"):
+            block += f"\nnote: {c['source_note']}"
+        listings_block.append(block)
 
     return (
         f'You are assessing second-hand marketplace listings for the watch list "{search.name}".\n\n'
-        "Some results are 'wanted' posts from buyers (e.g. Swedish \"Sökes\"/\"Köpes\"), not items actually "
-        "for sale - Blocket's API doesn't reliably flag these separately, so score them low/irrelevant "
-        "unless this watch list is specifically about buy requests.\n\n"
         + "\n".join(lines)
         + f"\n\nThere are exactly {len(candidates)} listings below, indexed [0] to [{len(candidates) - 1}]. "
         "Return exactly one result per listing, no more, no fewer. For each, give a score from 1 "

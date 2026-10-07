@@ -111,7 +111,13 @@ def run_marketplace_cycle(
             for batch_start in range(0, len(to_score), settings.scoring_batch_size):
                 batch_rows = to_score[batch_start : batch_start + settings.scoring_batch_size]
                 candidates = [
-                    {"title": r["title"], "description": r["description"], "price": r["price"], "url": r["url"]}
+                    {
+                        "title": r["title"],
+                        "description": r["description"],
+                        "price": r["price"],
+                        "url": r["url"],
+                        "source_note": getattr(get_marketplace(r["source"]), "scoring_note", None),
+                    }
                     for r in batch_rows
                 ]
                 try:

@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from watcher.models import Listing, MarketplaceConfig, Search
 from watcher.settings import Settings
 from watcher.sources import blocket as blocket_source
+from watcher.sources import rehifi as rehifi_source
 from watcher.sources import vinted as vinted_source
 
 
@@ -50,6 +51,13 @@ class Marketplace:
     # removal from search-result absence, which is unreliable once a listing
     # is old enough to fall off a newest-first sorted search.
     check_active: Optional[Callable[[str], bool]] = None
+    # Optional: standing context attached to every listing from this
+    # marketplace when it's sent to Claude for scoring (e.g. a known quirk in
+    # its results, or that every item includes a warranty). Attached per
+    # listing rather than once per prompt, since a single scoring batch can
+    # rarely mix listings from more than one marketplace (a straggler still
+    # pending from a previous cycle).
+    scoring_note: Optional[str] = None
 
 
 MARKETPLACES: Dict[str, "Marketplace"] = {}
@@ -90,6 +98,11 @@ register(
         default_request_delay_seconds=2.0,
         enrich_description=_blocket_enrich_description,
         check_active=_blocket_check_active,
+        scoring_note=(
+            "Some Blocket results are 'wanted' posts from buyers (e.g. Swedish \"Sökes\"/\"Köpes\"), not "
+            "items actually for sale - Blocket's search results don't reliably flag these separately, so "
+            "score them low/irrelevant unless this watch list is specifically about buy requests."
+        ),
     )
 )
 
@@ -121,5 +134,37 @@ register(
         default_request_delay_seconds=2.0,
         enrich_description=_vinted_enrich_description,
         check_active=_vinted_check_active,
+    )
+)
+
+
+# --- Rehifi ------------------------------------------------------------------
+
+def _rehifi_fetch(
+    phrase: str, *, search: Search, config: MarketplaceConfig, settings: Settings
+) -> List[Listing]:
+    # One online store, ships nationally - search.location/scope aren't used.
+    return rehifi_source.fetch(phrase)
+
+
+def _rehifi_check_active(url: str) -> bool:
+    return rehifi_source.check_active(url)
+
+
+register(
+    Marketplace(
+        key="rehifi",
+        display_name="Rehifi",
+        fetch=_rehifi_fetch,
+        auth_fields=(),
+        default_poll_interval_minutes=240,
+        default_request_delay_seconds=2.0,
+        check_active=_rehifi_check_active,
+        scoring_note=(
+            "This listing is from Rehifi, a Swedish online store selling used/refurbished hifi gear - "
+            "every purchase includes 3 months warranty, a 30-day exchange right, and a 10-day right of "
+            "return. Treat that warranty coverage as a genuine advantage over private-seller marketplaces "
+            "with no such protection, and factor it into your price assessment and score."
+        ),
     )
 )
