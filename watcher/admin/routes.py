@@ -248,10 +248,16 @@ def health_page(request: Request):
 
 @router.get("/healthz")
 def healthz(request: Request) -> JSONResponse:
-    """Machine-readable health check for Docker's HEALTHCHECK."""
+    """Machine-readable health check for Docker's HEALTHCHECK.
+
+    Looks at the last *completed* run, not just the most recent run row - a
+    run can legitimately take several minutes (sequential, rate-limited
+    fetches across every container), and that shouldn't register as
+    unhealthy while it's still in progress.
+    """
     conn = request.app.state.conn
     settings = request.app.state.settings
-    last_run = storage.get_last_run(conn)
+    last_run = storage.get_last_completed_run(conn)
 
     if last_run is None:
         return JSONResponse({"status": "starting"}, status_code=200)

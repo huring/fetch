@@ -38,7 +38,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 logger.error("ANTHROPIC_API_KEY not configured, skipping scheduled run")
                 return
             try:
-                run_once(conn, client, settings, dry_run=settings.dry_run)
+                result = run_once(conn, client, settings, dry_run=settings.dry_run)
+                logger.info("Scheduled run complete: %s", result)
             except Exception:
                 logger.exception("Scheduled run failed")
 

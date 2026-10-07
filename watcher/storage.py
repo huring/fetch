@@ -211,6 +211,14 @@ def get_last_run(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
     return conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
 
 
+def get_last_completed_run(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    """Like get_last_run, but skips a run still in progress - a run that's
+    simply taking a few minutes to fetch/score isn't "unhealthy"."""
+    return conn.execute(
+        "SELECT * FROM runs WHERE status != 'running' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+
+
 # --- Source health -----------------------------------------------------------
 
 def record_source_success(conn: sqlite3.Connection, source: str) -> None:

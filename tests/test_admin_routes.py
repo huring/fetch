@@ -99,3 +99,28 @@ def test_healthz_starting_when_no_runs(client):
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["status"] == "starting"
+
+
+def test_healthz_ok_while_a_newer_run_is_still_in_progress(client):
+    from watcher import storage
+
+    conn = client.app.state.conn
+    ok_run_id = storage.start_run(conn)
+    storage.finish_run(conn, ok_run_id, status="ok")
+    storage.start_run(conn)  # new run kicks off, left "running" (in progress)
+
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_healthz_unhealthy_when_last_completed_run_failed(client):
+    from watcher import storage
+
+    conn = client.app.state.conn
+    failed_run_id = storage.start_run(conn)
+    storage.finish_run(conn, failed_run_id, status="error", error_message="boom")
+
+    response = client.get("/healthz")
+    assert response.status_code == 503
+    assert response.json()["status"] == "unhealthy"

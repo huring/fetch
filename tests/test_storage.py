@@ -114,3 +114,19 @@ def test_monthly_cost_summary(conn):
     assert summary[0].input_tokens == 1500
     assert summary[0].output_tokens == 300
     assert round(summary[0].cost_usd, 4) == 0.0032
+
+
+def test_get_last_completed_run_skips_in_progress_run(conn):
+    ok_run_id = storage.start_run(conn)
+    storage.finish_run(conn, ok_run_id, status="ok")
+
+    storage.start_run(conn)  # a second run, still "running", no finish_run call
+
+    last_completed = storage.get_last_completed_run(conn)
+    assert last_completed["id"] == ok_run_id
+    assert last_completed["status"] == "ok"
+
+
+def test_get_last_completed_run_none_when_only_in_progress(conn):
+    storage.start_run(conn)
+    assert storage.get_last_completed_run(conn) is None

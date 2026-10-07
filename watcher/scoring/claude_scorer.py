@@ -74,10 +74,12 @@ def _build_prompt(container: Container, candidates: List[Dict[str, Any]]) -> str
         "for sale - Blocket's API doesn't reliably flag these separately, so score them low/irrelevant "
         "unless this watch list is specifically about buy requests.\n\n"
         + "\n".join(lines)
-        + "\n\nFor each listing below, give a score from 1 (irrelevant/bad match) to 10 (excellent match), "
-        "brief reasoning, a price assessment, and a list of any specs you are not certain about from the "
-        "listing text - never guess a spec you can't confirm, flag it instead. "
-        "Set listing_index to match the bracketed index below.\n\n" + "\n\n".join(listings_block)
+        + f"\n\nThere are exactly {len(candidates)} listings below, indexed [0] to [{len(candidates) - 1}]. "
+        "Return exactly one result per listing, no more, no fewer. For each, give a score from 1 "
+        "(irrelevant/bad match) to 10 (excellent match), brief reasoning, a price assessment, and a list "
+        "of any specs you are not certain about from the listing text - never guess a spec you can't "
+        "confirm, flag it instead. Set listing_index to match the bracketed index below exactly - do not "
+        "invent an index outside that range.\n\n" + "\n\n".join(listings_block)
     )
 
 
