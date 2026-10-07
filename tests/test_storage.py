@@ -187,6 +187,27 @@ def test_insert_price_history_and_delete_listing(conn, search_id):
     assert history["score"] == 7
 
 
+def test_clear_operational_data_keeps_searches_and_configs(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing())
+    storage.mark_scored(conn, listing_id, 7, "r", [], "p")
+    run_id = storage.start_run(conn)
+    storage.finish_run(conn, run_id, status="ok")
+    storage.log_token_usage(conn, run_id, "claude-haiku-4-5", 100, 50, 0.001)
+    storage.record_source_failure(conn, "blocket", "boom")
+    row = conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    storage.insert_price_history(conn, "Test search", row)
+
+    storage.clear_operational_data(conn)
+
+    assert conn.execute("SELECT COUNT(*) AS n FROM listings").fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM token_usage").fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM source_health").fetchone()["n"] == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM price_history").fetchone()["n"] == 0
+    # searches and marketplace configs are untouched
+    assert conn.execute("SELECT COUNT(*) AS n FROM searches").fetchone()["n"] == 1
+
+
 def test_mark_stale_notified(conn, search_id):
     listing_id = storage.upsert_listing(conn, search_id, make_listing())
     storage.mark_stale_notified(conn, listing_id)

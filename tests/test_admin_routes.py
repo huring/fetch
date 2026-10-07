@@ -182,6 +182,44 @@ def test_marketplace_edit_unknown_key_redirects(client):
     assert response.headers["location"] == "/marketplaces"
 
 
+def test_run_marketplace_now_redirects_with_ran_param(client):
+    response = client.post("/marketplaces/blocket/run", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/marketplaces?ran=blocket"
+
+    list_html = client.get("/marketplaces?ran=blocket").text
+    assert "Triggered a manual run for blocket" in list_html
+
+
+def test_run_marketplace_now_unknown_key_redirects(client):
+    response = client.post("/marketplaces/nonexistent/run", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/marketplaces"
+
+
+def test_clear_data_removes_listings_keeps_searches(client):
+    from watcher import searches, storage
+    from watcher.models import Listing
+
+    conn = client.app.state.conn
+    search = searches.get_search(conn, searches.list_searches(conn)[0].id)
+    storage.upsert_listing(
+        conn, search.id,
+        Listing(
+            source="blocket", external_id="clear-me", title="Temp", description="",
+            price=100, url="https://example.com/clear-me", location=None, ships=True,
+            published_at=None, raw={},
+        ),
+    )
+
+    response = client.post("/health/clear", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/health"
+
+    assert conn.execute("SELECT COUNT(*) AS n FROM listings").fetchone()["n"] == 0
+    assert len(searches.list_searches(conn)) > 0
+
+
 def test_healthz_starting_when_no_runs(client):
     response = client.get("/healthz")
     assert response.status_code == 200

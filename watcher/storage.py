@@ -269,6 +269,20 @@ def mark_digested(conn: sqlite3.Connection, listing_ids: List[int]) -> None:
     conn.commit()
 
 
+def clear_operational_data(conn: sqlite3.Connection) -> None:
+    """Deletes all accumulated listing/run/cost-tracking data - everything
+    fetched/scored/logged so far - while leaving search definitions and
+    marketplace configs (poll interval, auth) untouched. Used by the admin
+    UI's "clear data" action, mainly to get a clean slate for re-testing
+    after a change to what gets fetched or how it's scored."""
+    conn.execute("DELETE FROM listings")
+    conn.execute("DELETE FROM runs")
+    conn.execute("DELETE FROM token_usage")
+    conn.execute("DELETE FROM source_health")
+    conn.execute("DELETE FROM price_history")
+    conn.commit()
+
+
 # --- Run tracking -----------------------------------------------------------
 
 def start_run(conn: sqlite3.Connection) -> int:

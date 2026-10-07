@@ -86,12 +86,28 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except Exception:
                 logger.exception("Scheduled liveness sweep failed")
 
+        def _run_now(key: str):
+            if client is None:
+                logger.error("ANTHROPIC_API_KEY not configured, cannot run %s manually", key)
+                return
+            try:
+                result = run_marketplace_cycle(conn, client, settings, key, dry_run=settings.dry_run)
+                logger.info("Manually-triggered marketplace run complete (%s): %s", key, result)
+            except Exception:
+                logger.exception("Manually-triggered marketplace run failed for %s", key)
+
+        def trigger_marketplace_run(key: str) -> None:
+            # Runs on the scheduler's own thread, same as every other
+            # scheduled job - never blocks the request that triggered it.
+            scheduler.add_job(_run_now, args=[key], next_run_time=datetime.datetime.now())
+
         scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
         hour, minute = settings.digest_time.split(":")
         scheduler.add_job(_digest_job, CronTrigger(hour=int(hour), minute=int(minute)))
         scheduler.add_job(_liveness_job, CronTrigger(hour=LIVENESS_SWEEP_HOUR, minute=LIVENESS_SWEEP_MINUTE))
         scheduler.start()
         app.state.scheduler = scheduler
+        app.state.trigger_marketplace_run = trigger_marketplace_run
 
         yield
 

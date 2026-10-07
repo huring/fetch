@@ -30,4 +30,15 @@
         </tbody>
     </table>
 </fieldset>
+<fieldset>
+    <legend>Danger zone</legend>
+    <p class="muted">
+        Deletes every fetched/scored listing, run and cost-log entry - a clean
+        slate for re-testing. Searches and marketplace settings (poll interval,
+        auth) are not affected.
+    </p>
+    <form method="post" action="/health/clear" onsubmit="return confirm('Delete all listings, run history and cost logs? Searches and marketplace settings are kept.');">
+        <button class="danger" type="submit">Clear listings &amp; run history</button>
+    </form>
+</fieldset>
 {% endblock %}

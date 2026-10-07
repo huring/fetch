@@ -111,6 +111,16 @@ This replaced a single global `POLL_INTERVAL_MINUTES` env var - if you set
 that previously, it no longer has any effect; set the interval per
 marketplace at `/marketplaces` instead.
 
+Each marketplace also has a **Run now** button there, for testing without
+waiting for its next scheduled tick - it runs on the scheduler's own
+background thread (same as a normal scheduled cycle), so clicking it doesn't
+block the page. Results show up in `/health` and the search list shortly
+after. The `/health` page has a matching **Clear listings & run history**
+action for wiping accumulated data back to a clean slate (searches and
+marketplace settings aren't touched) - handy after a change to what gets
+fetched or how it's scored, to confirm the new behavior from scratch rather
+than mixed in with old results.
+
 ## Deploying via Portainer
 
 **Build pipeline: GitHub Actions -> GHCR -> Portainer pulls.** Portainer CE

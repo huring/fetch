@@ -189,7 +189,7 @@ def delete_search(request: Request, search_id: int):
 
 
 @router.get("/marketplaces", response_class=HTMLResponse)
-def list_marketplaces(request: Request):
+def list_marketplaces(request: Request, ran: Optional[str] = None):
     conn = request.app.state.conn
     configs = {c.key: c for c in marketplace_configs_repo.list_configs(conn)}
     rows = []
@@ -205,7 +205,7 @@ def list_marketplaces(request: Request):
                 "auth_configured": bool(config and config.auth),
             }
         )
-    return templates.TemplateResponse(request, "marketplaces_list.html", {"marketplaces": rows})
+    return templates.TemplateResponse(request, "marketplaces_list.html", {"marketplaces": rows, "ran": ran})
 
 
 @router.get("/marketplaces/{key}/edit", response_class=HTMLResponse)
@@ -235,12 +235,27 @@ async def update_marketplace(request: Request, key: str):
     return RedirectResponse("/marketplaces", status_code=303)
 
 
+@router.post("/marketplaces/{key}/run")
+def run_marketplace_now(request: Request, key: str):
+    if get_marketplace(key) is None:
+        return RedirectResponse("/marketplaces", status_code=303)
+    request.app.state.trigger_marketplace_run(key)
+    return RedirectResponse("/marketplaces?ran=" + key, status_code=303)
+
+
 @router.get("/health", response_class=HTMLResponse)
 def health_page(request: Request):
     conn = request.app.state.conn
     last_run = storage.get_last_run(conn)
     monthly_cost = storage.monthly_cost_summary(conn)
     return templates.TemplateResponse(request, "health.html", {"last_run": last_run, "monthly_cost": monthly_cost})
+
+
+@router.post("/health/clear")
+def clear_data(request: Request):
+    conn = request.app.state.conn
+    storage.clear_operational_data(conn)
+    return RedirectResponse("/health", status_code=303)
 
 
 @router.get("/healthz")
