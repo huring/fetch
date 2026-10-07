@@ -3,10 +3,9 @@
 # Dockerfile in a Git stack, so the image must already exist in GHCR (built
 # by the GitHub Actions workflow) before this stack can pull it.
 #
-# Replace <github-owner>/<repo> below with your own, e.g. ghcr.io/larshuring/hifi-agent.
 services:
   watcher:
-    image: ghcr.io/<github-owner>/hifi-agent:latest
+    image: ghcr.io/huring/hifi-agent:latest
     restart: unless-stopped
     ports:
       - "8000:8000"
