@@ -17,18 +17,14 @@ alone (see README and pipeline.py for where that's called).
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from watcher.models import Listing
-from watcher.sources.base import SourceError, get_json, get_text
+from watcher.sources.base import SourceError, extract_jsonld_description, get_json, get_text
 
 logger = logging.getLogger(__name__)
-
-_JSONLD_RE = re.compile(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
 
 SEARCH_URL = "https://www.blocket.se/recommerce/forsale/search/api/search/SEARCH_ID_BAP_COMMON"
 DEFAULT_CATEGORY = "93"  # Elektronik & vitvaror
@@ -145,11 +141,4 @@ def fetch_ad_description(url: str) -> str:
         logger.warning("Could not fetch Blocket ad detail page %s: %s", url, exc)
         return ""
 
-    match = _JSONLD_RE.search(html)
-    if not match:
-        return ""
-    try:
-        data = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return ""
-    return data.get("description") or ""
+    return extract_jsonld_description(html)

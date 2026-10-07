@@ -239,6 +239,23 @@ def test_run_marketplace_cycle_marks_fetched():
     assert config.last_fetch_at is not None
 
 
+def test_run_marketplace_cycle_works_for_vinted():
+    conn = make_conn()
+    searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["vinted"]))
+    client = make_anthropic_client(
+        [_ListingScore(listing_index=0, score=9, reasoning="great", uncertain_specs=[], price_assessment="good")]
+    )
+
+    with patch("watcher.sources.vinted.fetch", return_value=[make_listing("1", "Onkyo A-9010", description="x")]):
+        with patch("watcher.sources.vinted.fetch_item_description", return_value=""):
+            result = pipeline.run_marketplace_cycle(conn, client, make_settings(slack_webhook_url=""), "vinted")
+
+    assert result["searches_processed"] == 1
+    assert result["listings_scored"] == 1
+    config = marketplace_configs.get_config(conn, "vinted")
+    assert config.last_fetch_at is not None
+
+
 def test_run_marketplace_cycle_unknown_key_raises():
     conn = make_conn()
     client = make_anthropic_client([])

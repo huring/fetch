@@ -3,11 +3,11 @@
 Watches secondhand marketplaces for listings matching configurable "searches"
 (hifi gear, a pickup truck, bookshelves - anything), scores candidates
 against your criteria with Claude, and notifies you on Slack: instantly for
-standout finds, once a day for everything else. Blocket is the first and
-currently only marketplace; more can be added without touching the pipeline,
-admin routes, or templates (see "Marketplaces" below). Tradera support
-existed early on and was removed rather than left half-wired - it'll come
-back as a proper marketplace if/when it's needed.
+standout finds, once a day for everything else. Blocket and Vinted are
+currently registered; more can be added without touching the pipeline, admin
+routes, or templates (see "Marketplaces" below). Tradera support existed
+early on and was removed rather than left half-wired - it'll come back as a
+proper marketplace if/when it's needed.
 
 ## How it works
 
@@ -162,6 +162,26 @@ docker run --rm -v watcher_data:/data -v "$PWD":/backup alpine \
   wanted post), so this is handled with a standing instruction in Claude's
   scoring prompt rather than a prefilter rule, since reading "Sökes" in
   context is something Claude does reliably and a keyword filter would not.
+- **Vinted**: its own JSON API now sits behind a bootstrapped bearer token and
+  Cloudflare - but the plain catalog search *page* (the one a browser loads)
+  embeds the same item data as server-rendered JSON in a
+  `self.__next_f.push(...)` script tag, with no token or cookie needed at all
+  (confirmed live, 2026-10 - `watcher/sources/vinted.py` parses that embedded
+  JSON rather than calling the token-gated API). Same ToS situation as
+  Blocket: personal, low-frequency use of a public page, not a sanctioned API.
+  If Vinted changes its page structure, `_extract_catalog_items` is the one
+  place to fix - `--dry-run` and check the logs if results stop coming back.
+- **Vinted has no location/city filter and is shipping-only** - unlike
+  Blocket, a search's `scope`/`location` has no effect on Vinted results, and
+  every Vinted listing is marked `ships=True` rather than left uncertain.
+- **Vinted's search results carry no description text**, same as Blocket -
+  `vinted.fetch_item_description` enriches from the item's detail page via
+  the same embedded JSON-LD mechanism Blocket uses, but unlike Blocket's
+  truncated ~150-char snippet, Vinted's is the **full, untruncated
+  description** (confirmed live). That page's JSON-LD also contains a price,
+  but in the seller's own listing currency (not SEK) - the enrichment only
+  ever reads the description field, never the price, to avoid silently
+  mixing currencies.
 
 ## Local development
 

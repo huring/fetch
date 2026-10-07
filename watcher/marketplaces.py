@@ -21,6 +21,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from watcher.models import Listing, MarketplaceConfig, Search
 from watcher.settings import Settings
 from watcher.sources import blocket as blocket_source
+from watcher.sources import vinted as vinted_source
 
 
 @dataclass(frozen=True)
@@ -79,5 +80,31 @@ register(
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,
         enrich_description=_blocket_enrich_description,
+    )
+)
+
+
+# --- Vinted ------------------------------------------------------------------
+
+def _vinted_fetch(
+    phrase: str, *, search: Search, config: MarketplaceConfig, settings: Settings
+) -> List[Listing]:
+    # Vinted has no location/city filter - search.location/scope aren't used.
+    return vinted_source.fetch(phrase, max_pages=settings.max_pages_per_query)
+
+
+def _vinted_enrich_description(url: str) -> str:
+    return vinted_source.fetch_item_description(url)
+
+
+register(
+    Marketplace(
+        key="vinted",
+        display_name="Vinted",
+        fetch=_vinted_fetch,
+        auth_fields=(),
+        default_poll_interval_minutes=240,
+        default_request_delay_seconds=2.0,
+        enrich_description=_vinted_enrich_description,
     )
 )
