@@ -52,9 +52,21 @@ def _build_prompt(search: Search, candidates: List[Dict[str, Any]]) -> str:
     if search.soft_criteria:
         lines.append("Nice-to-haves (boost score, not disqualifying):")
         lines.extend(f"- {c}" for c in search.soft_criteria)
-    if search.watched_models:
+    ideal_models = [wm for wm in search.watched_models if wm.is_ideal]
+    other_models = [wm for wm in search.watched_models if not wm.is_ideal]
+    if ideal_models:
+        lines.append(
+            "Buy-it-now target(s) for this search (pattern: note, good price) - if a listing is "
+            "genuinely one of these (or a clear equivalent) in working condition at or below its "
+            "good price, score it 10/10. Score every other candidate in this search relative to how "
+            "it compares against this benchmark (closer in spec/condition/price = higher, further = "
+            "lower), while still respecting the hard requirements above:"
+        )
+        for wm in ideal_models:
+            lines.append(f"- {wm.pattern}: {wm.note} (good price: {wm.good_price or 'n/a'})")
+    if other_models:
         lines.append("Specifically watched models (pattern: note, good price):")
-        for wm in search.watched_models:
+        for wm in other_models:
             lines.append(f"- {wm.pattern}: {wm.note} (good price: {wm.good_price or 'n/a'})")
     if search.require_shipping:
         lines.append(

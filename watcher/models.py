@@ -14,6 +14,11 @@ class WatchedModel(BaseModel):
     pattern: str
     note: str = ""
     good_price: str = ""
+    # The buy-it-now / grail target for this search: if a listing is
+    # genuinely this (or equivalent) in working condition at or below
+    # good_price, Claude is instructed to score it 10/10 and use it as the
+    # benchmark every other candidate in the search is judged against.
+    is_ideal: bool = False
 
 
 class Search(BaseModel):

@@ -38,12 +38,15 @@ def _parse_watched_models(text: str) -> List[WatchedModel]:
             continue
         note = parts[1] if len(parts) > 1 else ""
         good_price = parts[2] if len(parts) > 2 else ""
-        result.append(WatchedModel(pattern=pattern, note=note, good_price=good_price))
+        is_ideal = bool(parts[3]) if len(parts) > 3 else False
+        result.append(WatchedModel(pattern=pattern, note=note, good_price=good_price, is_ideal=is_ideal))
     return result
 
 
 def _watched_models_to_text(items: List[WatchedModel]) -> str:
-    return "\n".join(f"{wm.pattern} | {wm.note} | {wm.good_price}" for wm in items)
+    return "\n".join(
+        f"{wm.pattern} | {wm.note} | {wm.good_price} | {'ideal' if wm.is_ideal else ''}" for wm in items
+    )
 
 
 def _search_to_form(search: Optional[Search]) -> dict:

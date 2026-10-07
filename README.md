@@ -51,7 +51,8 @@ Everything you watch for is a **search**: a name, a scope (local/national + a
 location), whether shipping should be required, a deterministic prefilter
 (max price / excluded models / excluded words / required keywords), free-text
 hard and soft criteria for Claude's judgment, watched models (wildcard pattern
-+ note + rough good price), and a shared list of search phrases - all stored
++ note + rough good price, optionally flagged as a buy-it-now/ideal target -
+see below), and a shared list of search phrases - all stored
 once on the search itself, not duplicated per marketplace. A search also
 picks which registered marketplace(s) it runs on; each
 marketplace decides how to use the search's phrases and other settings (e.g.
@@ -72,6 +73,20 @@ in the UI, since they default to national/no-location.
 List fields in the form (excluded models, watched models, search phrases, ...)
 are edited as plain text, one entry per line - the format for multi-part
 fields (watched models) is shown as a hint under each field.
+
+A watched model can be flagged as a **buy-it-now / ideal target** by writing
+`ideal` in its 4th field (`pattern | note | good price | ideal`) - e.g. the
+one GPU model you actually want, or the exact AV receiver that'd be a
+no-brainer at the right price. If a listing is genuinely that model (or a
+clear equivalent) in working condition at or below its good price, Claude
+scores it 10/10 (triggering the usual instant Slack alert, no separate
+mechanism needed) and judges every other candidate in that search relative
+to it. This is still Claude's judgment, not a deterministic price/title
+match, so a "wanted" post or a broken unit that happens to mention the model
+name won't blindly score 10. Note that the deterministic `max_price` filter
+still runs first - set it generously (or leave it blank) if your ideal
+target's good-price range sits above what you'd otherwise cap a search at,
+or it'll get silently filtered out before Claude ever sees it.
 
 The search list shows three counts per search, each a link to the actual
 listings behind it (so you can check what's there without going via Slack):

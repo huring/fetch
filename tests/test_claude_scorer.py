@@ -84,6 +84,49 @@ def test_score_batch_includes_source_note_in_prompt_when_present():
     assert sent_prompt.count("note:") == 1  # only the first candidate has a source_note
 
 
+def test_build_prompt_separates_ideal_from_other_watched_models():
+    search = Search(
+        name="GPU hunt",
+        watched_models=[
+            WatchedModel(pattern="RTX 4080", note="the one I want", good_price="7000-8000 SEK", is_ideal=True),
+            WatchedModel(pattern="RTX 4070", note="acceptable fallback", good_price="5000-6000 SEK"),
+        ],
+    )
+    candidates = [{"title": "RTX 4080", "description": "", "price": 7500, "url": "u"}]
+    client = make_client(
+        [_ListingScore(listing_index=0, score=10, reasoning="r", uncertain_specs=[], price_assessment="p")]
+    )
+
+    score_batch(client, "claude-haiku-4-5", search, candidates)
+
+    sent_prompt = client.messages.parse.call_args.kwargs["messages"][0]["content"]
+    assert "Buy-it-now target(s)" in sent_prompt
+    assert "score it 10/10" in sent_prompt
+    assert "RTX 4080: the one I want (good price: 7000-8000 SEK)" in sent_prompt
+    assert "Specifically watched models" in sent_prompt
+    assert "RTX 4070: acceptable fallback (good price: 5000-6000 SEK)" in sent_prompt
+    # the ideal entry shouldn't also appear under the plain watched-models section
+    watched_section = sent_prompt.split("Specifically watched models")[1].split("\n\n")[0]
+    assert "RTX 4080" not in watched_section
+
+
+def test_build_prompt_omits_ideal_section_when_none_marked():
+    search = Search(
+        name="Test",
+        watched_models=[WatchedModel(pattern="TX-NR6*", note="n", good_price="p")],
+    )
+    candidates = [{"title": "A", "description": "", "price": 100, "url": "u"}]
+    client = make_client(
+        [_ListingScore(listing_index=0, score=5, reasoning="r", uncertain_specs=[], price_assessment="p")]
+    )
+
+    score_batch(client, "claude-haiku-4-5", search, candidates)
+
+    sent_prompt = client.messages.parse.call_args.kwargs["messages"][0]["content"]
+    assert "Buy-it-now target(s)" not in sent_prompt
+    assert "Specifically watched models" in sent_prompt
+
+
 def test_estimate_cost_usd_haiku_rates():
     cost = estimate_cost_usd("claude-haiku-4-5", input_tokens=1_000_000, output_tokens=1_000_000)
     assert round(cost, 2) == 6.00

@@ -129,6 +129,40 @@ def test_create_search_via_form(client):
     assert "Pickup truck" in list_response.text
 
 
+def test_watched_model_ideal_flag_round_trips_through_form(client):
+    response = client.post(
+        "/searches/new",
+        data={
+            "name": "GPU hunt",
+            "enabled": "on",
+            "scope": "national",
+            "location": "",
+            "max_price": "",
+            "watched_models": "RTX 4080 | the one I want | 7000-8000 SEK | ideal\nRTX 4070 | fallback | 5000-6000 SEK |",
+            "search_phrases": "rtx",
+            "marketplaces": "blocket",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    import re
+
+    list_html = client.get("/searches").text
+    search_id = re.search(r"/searches/(\d+)/edit", list_html).group(1)
+
+    from watcher import searches as searches_repo
+
+    search = searches_repo.get_search(client.app.state.conn, int(search_id))
+    ideal = [wm for wm in search.watched_models if wm.is_ideal]
+    other = [wm for wm in search.watched_models if not wm.is_ideal]
+    assert [wm.pattern for wm in ideal] == ["RTX 4080"]
+    assert [wm.pattern for wm in other] == ["RTX 4070"]
+
+    edit_html = client.get(f"/searches/{search_id}/edit").text
+    assert "RTX 4080 | the one I want | 7000-8000 SEK | ideal" in edit_html
+
+
 def test_toggle_and_delete_search(client):
     client.post(
         "/searches/new",

@@ -43,7 +43,7 @@
         <label>Soft criteria / nice-to-haves <span class="hint">(one per line)</span>
             <textarea name="soft_criteria">{{ form.soft_criteria }}</textarea>
         </label>
-        <label>Watched models <span class="hint">(one per line: <code>pattern | note | good price</code>, e.g. <code>TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK</code>)</span>
+        <label>Watched models <span class="hint">(one per line: <code>pattern | note | good price | ideal</code> - leave the last part blank for a normal watched model, or write <code>ideal</code> to mark it as your buy-it-now/grail target: if genuinely found at or below its good price, Claude scores it 10/10 and judges every other candidate in this search against it. e.g. <code>TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK |</code> or <code>RTX 4080 | the one I actually want | 7000-8000 SEK | ideal</code>)</span>
             <textarea name="watched_models">{{ form.watched_models }}</textarea>
         </label>
     </fieldset>
