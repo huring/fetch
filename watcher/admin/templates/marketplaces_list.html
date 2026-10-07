@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Marketplaces{% endblock %}
+{% block content %}
+<h1>Marketplaces</h1>
+<p class="muted">Where searches are run and how often. Add a marketplace to a search under that search's "Source queries" section.</p>
+<table>
+    <thead>
+        <tr><th>Name</th><th>Poll interval</th><th>Request delay</th><th>Auth</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for m in marketplaces %}
+        <tr>
+            <td>{{ m.display_name }}</td>
+            <td>{{ m.poll_interval_minutes }} min</td>
+            <td>{{ m.request_delay_seconds }}s</td>
+            <td>
+                {% if m.has_auth_fields %}
+                    <span class="pill {{ 'on' if m.auth_configured else 'off' }}">{{ 'configured' if m.auth_configured else 'not set' }}</span>
+                {% else %}
+                    <span class="muted">none needed</span>
+                {% endif %}
+            </td>
+            <td><a class="button secondary" href="/marketplaces/{{ m.key }}/edit">Edit</a></td>
+        </tr>
+    {% else %}
+        <tr><td colspan="5" class="muted">No marketplaces registered.</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

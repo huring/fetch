@@ -1,4 +1,14 @@
-"""FastAPI app factory: wires the admin UI, DB connection and the scheduler."""
+"""FastAPI app factory: wires the admin UI, DB connection and the scheduler.
+
+Each marketplace polls on its own cadence (poll_interval_minutes in its
+marketplace_configs row, admin-UI-editable). Rather than one APScheduler job
+per marketplace with a fixed interval - which would need rescheduling
+whenever the admin changes that interval - a single lightweight "tick" job
+runs every TICK_INTERVAL_MINUTES and checks each registered marketplace's
+config fresh from the DB: if enough time has passed since its last fetch, it
+runs that marketplace's cycle. A config change takes effect on the next tick,
+no restart needed.
+"""
 from __future__ import annotations
 
 import datetime
@@ -12,12 +22,23 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 
 from watcher import db
+from watcher import marketplace_configs as marketplace_configs_repo
 from watcher.admin.routes import router
-from watcher.pipeline import run_once, send_digest
+from watcher.marketplaces import MARKETPLACES
+from watcher.pipeline import run_marketplace_cycle, send_digest
 from watcher.seed import seed_default_searches
 from watcher.settings import Settings, load_settings
 
 logger = logging.getLogger(__name__)
+
+TICK_INTERVAL_MINUTES = 5
+
+
+def _is_due(config, now: datetime.datetime) -> bool:
+    if config.last_fetch_at is None:
+        return True
+    last = datetime.datetime.strptime(config.last_fetch_at, "%Y-%m-%d %H:%M:%S")
+    return (now - last) >= datetime.timedelta(minutes=config.poll_interval_minutes)
 
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
@@ -27,21 +48,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         conn = db.connect(settings.db_path)
         seed_default_searches(conn)
+        marketplace_configs_repo.ensure_defaults(conn)
         client = Anthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else None
         app.state.conn = conn
         app.state.settings = settings
 
         scheduler = BackgroundScheduler()
 
-        def _run_job():
+        def _tick():
             if client is None:
-                logger.error("ANTHROPIC_API_KEY not configured, skipping scheduled run")
+                logger.error("ANTHROPIC_API_KEY not configured, skipping tick")
                 return
-            try:
-                result = run_once(conn, client, settings, dry_run=settings.dry_run)
-                logger.info("Scheduled run complete: %s", result)
-            except Exception:
-                logger.exception("Scheduled run failed")
+            now = datetime.datetime.utcnow()
+            for key in MARKETPLACES:
+                config = marketplace_configs_repo.get_config(conn, key)
+                if config is None or not _is_due(config, now):
+                    continue
+                try:
+                    result = run_marketplace_cycle(conn, client, settings, key, dry_run=settings.dry_run)
+                    logger.info("Marketplace cycle complete (%s): %s", key, result)
+                except Exception:
+                    logger.exception("Marketplace cycle failed for %s", key)
 
         def _digest_job():
             try:
@@ -49,10 +76,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except Exception:
                 logger.exception("Scheduled digest send failed")
 
-        scheduler.add_job(
-            _run_job, "interval", minutes=settings.poll_interval_minutes,
-            next_run_time=datetime.datetime.now(),
-        )
+        scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
         hour, minute = settings.digest_time.split(":")
         scheduler.add_job(_digest_job, CronTrigger(hour=int(hour), minute=int(minute)))
         scheduler.start()

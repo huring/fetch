@@ -50,12 +50,13 @@
 
     <fieldset>
         <legend>Source queries</legend>
-        <label>Blocket queries <span class="hint">(one per line: <code>q | category | sub_category</code> - category/sub_category optional)</span>
-            <textarea name="blocket_queries">{{ form.blocket_queries }}</textarea>
+        {% for m in marketplaces %}
+        <label>{{ m.display_name }} queries <span class="hint">({{ m.query_line_hint }})</span>
+            <textarea name="marketplace_queries__{{ m.key }}">{{ form.marketplace_queries[m.key] }}</textarea>
         </label>
-        <label>Tradera queries <span class="hint">(one per line: <code>query | category_id</code> - category_id optional)</span>
-            <textarea name="tradera_queries">{{ form.tradera_queries }}</textarea>
-        </label>
+        {% else %}
+        <p class="muted">No marketplaces registered.</p>
+        {% endfor %}
     </fieldset>
 
     <div class="actions">

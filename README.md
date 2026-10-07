@@ -1,15 +1,19 @@
 # Secondhand marketplace watcher
 
-Watches Blocket and Tradera for listings matching configurable "searches"
+Watches secondhand marketplaces for listings matching configurable "searches"
 (hifi gear, a pickup truck, bookshelves - anything), scores candidates
 against your criteria with Claude, and notifies you on Slack: instantly for
-standout finds, once a day for everything else.
+standout finds, once a day for everything else. Blocket is the first and
+currently only marketplace; more can be added without touching the pipeline,
+admin routes, or templates (see "Marketplaces" below). Tradera support
+existed early on and was removed rather than left half-wired - it'll come
+back as a proper marketplace if/when it's needed.
 
 ## How it works
 
-1. **Fetch** - every `POLL_INTERVAL_MINUTES` (default 240, i.e. every 4 hours), runs every enabled
-   search's Blocket/Tradera queries sequentially, with a short delay between
-   requests.
+1. **Fetch** - each marketplace polls on its own schedule (see "Marketplaces"
+   below), running every enabled search's queries for that marketplace
+   sequentially, with a short delay between requests.
 2. **Dedupe** - seen listings and price history live in SQLite, keyed per
    `(search, source, listing id)`. A price drop on a previously-seen listing
    is treated as new again.
@@ -25,10 +29,10 @@ standout finds, once a day for everything else.
    Slack immediately. Scores between `SCORE_DIGEST_MIN` (default 5) and the
    instant threshold are batched into one Slack message per day at
    `DIGEST_TIME` (default 08:00, local time), grouped by search.
-6. **Health** - if a source errors or returns nothing for
+6. **Health** - if a marketplace errors or returns nothing for
    `HEALTH_ALERT_AFTER_N_FAILURES` (default 3) runs in a row, a warning goes
-   to Slack. Blocket and Tradera have no uptime guarantees for this kind of
-   access, so this is the early-warning signal that something broke silently.
+   to Slack. Blocket has no uptime guarantee for this kind of access, so this
+   is the early-warning signal that something broke silently.
 
 ## Searches and the admin UI
 
@@ -36,8 +40,10 @@ Everything you watch for is a **search**: a name, a scope (local/national + a
 location), whether shipping should be required, a deterministic prefilter
 (max price / excluded models / excluded words / required keywords), free-text
 hard and soft criteria for Claude's judgment, watched models (wildcard pattern
-+ note + rough good price), and the actual Blocket/Tradera search queries to
-run.
++ note + rough good price), and the actual search queries to run - one list
+per marketplace it's attached to (a search can use more than one). The search
+form only shows a query box for marketplaces that are actually registered -
+today that's just Blocket.
 
 Searches live in the same SQLite database as everything else and are managed
 entirely through the admin UI at `http://<host>:8000/searches` - there are no
@@ -54,6 +60,31 @@ List fields in the form (excluded models, watched models, queries, ...) are
 edited as plain text, one entry per line - the format for multi-part fields
 (watched models, queries) is shown as a hint under each field.
 
+## Marketplaces
+
+A marketplace (`watcher/marketplaces.py`) is a code-level registration: its
+query schema, fetch logic, and the plain-text format the admin UI uses for
+its query boxes. Adding a new one means writing a source adapter plus one
+`register(...)` call - nothing in the pipeline, admin routes, or templates
+needs to change.
+
+What's *not* code is per-deployment and lives in the admin UI at
+`http://<host>:8000/marketplaces`, one row per registered marketplace:
+
+- **Poll interval** - how often that marketplace's searches are fetched.
+  Each marketplace runs on its own independent schedule; a lightweight
+  scheduler tick (every 5 minutes) checks each one's config fresh from the
+  database and only runs a cycle once its own interval has elapsed. Changing
+  the interval here takes effect on the next tick - no restart needed.
+- **Request delay** - pause between individual requests to that marketplace.
+- **Auth** (if the marketplace needs any - Blocket doesn't) - e.g. an API
+  key. Secret fields are never echoed back in the form; leaving one blank on
+  save keeps the current value rather than clearing it.
+
+This replaced a single global `POLL_INTERVAL_MINUTES` env var - if you set
+that previously, it no longer has any effect; set the interval per
+marketplace at `/marketplaces` instead.
+
 ## Deploying via Portainer
 
 **Build pipeline: GitHub Actions -> GHCR -> Portainer pulls.** Portainer CE
@@ -68,10 +99,11 @@ limitation, not configuration) and has no stack webhooks in the free tier
    interval you're comfortable with (e.g. every few minutes). Portainer pulls
    the compose file from Git and the image from GHCR - it never builds
    anything itself.
-3. Set the secrets (`ANTHROPIC_API_KEY`, `TRADERA_APP_ID`, `TRADERA_APP_KEY`,
-   `SLACK_WEBHOOK_URL`) as environment variables on the Portainer stack, not
-   in the repo. `.env.example` documents every variable; `.env` itself is
-   gitignored.
+3. Set the secrets (`ANTHROPIC_API_KEY`, `SLACK_WEBHOOK_URL`) as environment
+   variables on the Portainer stack, not in the repo. `.env.example`
+   documents every variable; `.env` itself is gitignored. (Marketplace-level
+   secrets, if a marketplace ever needs one, are set separately in the admin
+   UI at `/marketplaces` - see above - not here.)
 4. If `ghcr.io/<you>/hifi-agent` is a private package, add it as a Custom
    Registry in Portainer (Registries -> Add registry) with a GitHub PAT that
    has `read:packages`, so the stack can pull it. Making the package public
@@ -106,15 +138,6 @@ docker run --rm -v watcher_data:/data -v "$PWD":/backup alpine \
   (one request per search every ~20 min) monitoring. That's a real ToS
   conflict, not just a gray area; it's a deliberate choice made when this
   project was scoped, not something this code decides for you.
-- **Tradera**: implemented against the officially documented REST v4 API
-  (`api.tradera.com`, `X-App-Id`/`X-App-Key` headers), which Tradera
-  themselves describe as built for AI-agent integrations. The exact endpoint
-  path and query parameter names in `watcher/sources/tradera.py` follow
-  community client conventions, not a directly confirmed OpenAPI spec (the
-  developer portal is a JS app that couldn't be fully inspected). Register
-  your own app at api.tradera.com, then run once with `--dry-run` and check
-  the logs before trusting results - `_parse_item`/`_SEARCH_PATH` are the one
-  place to adjust field/endpoint names if they don't match.
 - **Blocket response field names**: confirmed live during development
   (2026-10) - search results use a top-level `docs` key, `price.amount`, and
   an epoch-millisecond `timestamp` field, all handled in `_parse_ad`. If
@@ -163,8 +186,7 @@ python -m watcher.main
 
 ## Environment variables
 
-See `.env.example` for the full list with defaults. Secrets
-(`ANTHROPIC_API_KEY`, `TRADERA_APP_ID`, `TRADERA_APP_KEY`,
-`SLACK_WEBHOOK_URL`) have no defaults and must be set for real runs; sources
-without Tradera credentials configured are skipped with a log warning rather
-than failing the whole run.
+See `.env.example` for the full list with defaults. `ANTHROPIC_API_KEY` and
+`SLACK_WEBHOOK_URL` have no defaults and must be set for real runs.
+Per-marketplace settings (poll interval, request delay, auth) are not env
+vars - see "Marketplaces" above.

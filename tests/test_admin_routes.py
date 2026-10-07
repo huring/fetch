@@ -8,19 +8,14 @@ from watcher.settings import Settings
 def make_settings(db_path):
     return Settings(
         db_path=db_path,
-        poll_interval_minutes=20,
         digest_time="08:00",
         score_instant_threshold=8,
         score_digest_min=5,
         health_alert_after_n_failures=3,
         claude_model="claude-haiku-4-5",
         scoring_batch_size=10,
-        blocket_request_delay_seconds=0,
-        tradera_request_delay_seconds=0,
         max_pages_per_query=1,
         anthropic_api_key="",
-        tradera_app_id="",
-        tradera_app_key="",
         slack_webhook_url="",
         dry_run=True,
         admin_port=8000,
@@ -62,8 +57,7 @@ def test_create_search_via_form(client):
             "hard_criteria": "4x4\ndiesel",
             "soft_criteria": "",
             "watched_models": "Toyota Hilux* | reliable | 80000-120000 SEK",
-            "blocket_queries": "pickup | bilar | ",
-            "tradera_queries": "",
+            "marketplace_queries__blocket": "pickup | bilar | ",
         },
         follow_redirects=False,
     )
@@ -93,6 +87,37 @@ def test_toggle_and_delete_search(client):
     client.post(f"/searches/{search_id}/delete")
     final_html = client.get("/searches").text
     assert "Bokhyllor" not in final_html
+
+
+def test_marketplaces_list_shows_blocket(client):
+    response = client.get("/marketplaces")
+    assert response.status_code == 200
+    assert "Blocket" in response.text
+    assert "240 min" in response.text  # default poll interval
+
+
+def test_marketplace_edit_updates_poll_interval(client):
+    response = client.post(
+        "/marketplaces/blocket/edit",
+        data={"poll_interval_minutes": "60", "request_delay_seconds": "1.5"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    list_html = client.get("/marketplaces").text
+    assert "60 min" in list_html
+
+    from watcher import marketplace_configs
+
+    config = marketplace_configs.get_config(client.app.state.conn, "blocket")
+    assert config.poll_interval_minutes == 60
+    assert config.request_delay_seconds == 1.5
+
+
+def test_marketplace_edit_unknown_key_redirects(client):
+    response = client.get("/marketplaces/nonexistent/edit", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/marketplaces"
 
 
 def test_healthz_starting_when_no_runs(client):

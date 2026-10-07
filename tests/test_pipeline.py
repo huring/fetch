@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import responses
 
-from watcher import db, pipeline, searches, storage
-from watcher.models import BlocketQuery, Search
+from watcher import db, marketplace_configs, pipeline, searches, storage
+from watcher.models import Search
 from watcher.scoring.claude_scorer import _BatchScoreResponse, _ListingScore
 from watcher.settings import Settings
 
@@ -21,22 +21,27 @@ def no_ad_detail_fetch_by_default():
         yield
 
 
+def make_conn():
+    """A fresh in-memory DB with marketplace_configs seeded and request
+    delays zeroed out, so pipeline tests don't actually sleep."""
+    conn = db.connect(":memory:")
+    marketplace_configs.ensure_defaults(conn)
+    for config in marketplace_configs.list_configs(conn):
+        marketplace_configs.update_config(conn, config.key, config.poll_interval_minutes, 0.0, {})
+    return conn
+
+
 def make_settings(**overrides):
     base = dict(
         db_path=":memory:",
-        poll_interval_minutes=20,
         digest_time="08:00",
         score_instant_threshold=8,
         score_digest_min=5,
         health_alert_after_n_failures=3,
         claude_model="claude-haiku-4-5",
         scoring_batch_size=10,
-        blocket_request_delay_seconds=0,
-        tradera_request_delay_seconds=0,
         max_pages_per_query=1,
         anthropic_api_key="x",
-        tradera_app_id="",
-        tradera_app_key="",
         slack_webhook_url=WEBHOOK,
         dry_run=False,
         admin_port=8000,
@@ -70,9 +75,9 @@ def make_listing(external_id, title, price=1000, description=""):
 
 @responses.activate
 def test_run_once_sends_instant_notification_for_high_score():
-    conn = db.connect(":memory:")
-    search = searches.create_search(
-        conn, Search(name="Vardagsrummet AV-receiver", blocket_queries=[BlocketQuery(q="onkyo")])
+    conn = make_conn()
+    searches.create_search(
+        conn, Search(name="Vardagsrummet AV-receiver", marketplace_queries={"blocket": [{"q": "onkyo"}]})
     )
     responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
 
@@ -89,14 +94,26 @@ def test_run_once_sends_instant_notification_for_high_score():
     assert len(responses.calls) == 1
 
 
+def test_run_once_skips_searches_without_this_marketplace():
+    conn = make_conn()
+    searches.create_search(conn, Search(name="No marketplace yet"))  # marketplace_queries={}
+
+    with patch("watcher.sources.blocket.fetch") as mock_fetch:
+        client = make_anthropic_client([])
+        result = pipeline.run_marketplace_cycle(conn, client, make_settings(), "blocket")
+
+    mock_fetch.assert_not_called()
+    assert result["searches_processed"] == 0
+
+
 def test_run_once_prefilter_excludes_without_calling_claude():
-    conn = db.connect(":memory:")
-    search = searches.create_search(
+    conn = make_conn()
+    searches.create_search(
         conn,
         Search(
             name="Vardagsrummet AV-receiver",
             excluded_words=["trasig"],
-            blocket_queries=[BlocketQuery(q="onkyo")],
+            marketplace_queries={"blocket": [{"q": "onkyo"}]},
         ),
     )
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Onkyo TX-SR607, trasig")]):
@@ -111,9 +128,9 @@ def test_run_once_prefilter_excludes_without_calling_claude():
 
 @responses.activate
 def test_run_once_dry_run_does_not_post_or_mark_notified():
-    conn = db.connect(":memory:")
+    conn = make_conn()
     searches.create_search(
-        conn, Search(name="Stugan hifi", blocket_queries=[BlocketQuery(q="leak")])
+        conn, Search(name="Stugan hifi", marketplace_queries={"blocket": [{"q": "leak"}]})
     )
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Leak Stereo 130")]):
         client = make_anthropic_client(
@@ -128,9 +145,9 @@ def test_run_once_dry_run_does_not_post_or_mark_notified():
 
 
 def test_run_once_marks_source_failure_and_alerts_after_threshold():
-    conn = db.connect(":memory:")
+    conn = make_conn()
     searches.create_search(
-        conn, Search(name="C", blocket_queries=[BlocketQuery(q="x")])
+        conn, Search(name="C", marketplace_queries={"blocket": [{"q": "x"}]})
     )
     settings = make_settings(health_alert_after_n_failures=2)
     client = make_anthropic_client([])
@@ -154,7 +171,7 @@ def test_run_once_marks_source_failure_and_alerts_after_threshold():
 
 @responses.activate
 def test_send_digest_groups_by_search_and_marks_digested():
-    conn = db.connect(":memory:")
+    conn = make_conn()
     search = searches.create_search(conn, Search(name="Stugan hifi"))
     listing_id = storage.upsert_listing(
         conn,
@@ -172,9 +189,9 @@ def test_send_digest_groups_by_search_and_marks_digested():
 
 
 def test_run_once_enriches_blocket_description_before_scoring():
-    conn = db.connect(":memory:")
+    conn = make_conn()
     searches.create_search(
-        conn, Search(name="C", blocket_queries=[BlocketQuery(q="marantz")])
+        conn, Search(name="C", marketplace_queries={"blocket": [{"q": "marantz"}]})
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Marantz SR5010")]):
@@ -191,10 +208,10 @@ def test_run_once_enriches_blocket_description_before_scoring():
 
 
 def test_run_once_rejects_after_enrichment_reveals_excluded_word():
-    conn = db.connect(":memory:")
+    conn = make_conn()
     searches.create_search(
         conn,
-        Search(name="C", excluded_words=["trasig"], blocket_queries=[BlocketQuery(q="marantz")]),
+        Search(name="C", excluded_words=["trasig"], marketplace_queries={"blocket": [{"q": "marantz"}]}),
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Marantz SR5010")]):
@@ -207,3 +224,22 @@ def test_run_once_rejects_after_enrichment_reveals_excluded_word():
     row = conn.execute("SELECT * FROM listings").fetchone()
     assert row["score"] == 0
     assert row["description"] == "Trasig display, annars ok"
+
+
+def test_run_marketplace_cycle_marks_fetched():
+    conn = make_conn()
+    searches.create_search(conn, Search(name="C", marketplace_queries={"blocket": [{"q": "x"}]}))
+    client = make_anthropic_client([])
+
+    with patch("watcher.sources.blocket.fetch", return_value=[]):
+        pipeline.run_marketplace_cycle(conn, client, make_settings(), "blocket")
+
+    config = marketplace_configs.get_config(conn, "blocket")
+    assert config.last_fetch_at is not None
+
+
+def test_run_marketplace_cycle_unknown_key_raises():
+    conn = make_conn()
+    client = make_anthropic_client([])
+    with pytest.raises(ValueError):
+        pipeline.run_marketplace_cycle(conn, client, make_settings(), "nonexistent")

@@ -23,11 +23,6 @@ class BlocketQuery(BaseModel):
     region: Optional[str] = None
 
 
-class TraderaQuery(BaseModel):
-    query: str
-    category_id: Optional[str] = None
-
-
 class Search(BaseModel):
     id: Optional[int] = None
     name: str
@@ -42,9 +37,21 @@ class Search(BaseModel):
     watched_models: List[WatchedModel] = Field(default_factory=list)
     hard_criteria: List[str] = Field(default_factory=list)
     soft_criteria: List[str] = Field(default_factory=list)
-    blocket_queries: List[BlocketQuery] = Field(default_factory=list)
-    tradera_queries: List[TraderaQuery] = Field(default_factory=list)
+    # Keyed by marketplace key (e.g. "blocket"); each value is a list of raw
+    # dicts matching that marketplace's query_model, validated on use via the
+    # marketplace registry rather than at the Search model level, so adding a
+    # new marketplace never requires changing this schema.
+    marketplace_queries: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class MarketplaceConfig(BaseModel):
+    key: str
+    poll_interval_minutes: int
+    request_delay_seconds: float
+    auth: Dict[str, str] = Field(default_factory=dict)
+    last_fetch_at: Optional[str] = None
     updated_at: Optional[str] = None
 
 

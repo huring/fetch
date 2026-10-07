@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import List, Optional
 
-from watcher.models import BlocketQuery, Search, TraderaQuery, WatchedModel
+from watcher.models import Search, WatchedModel
 
 _LIST_FIELDS = (
     "excluded_models",
@@ -14,8 +14,6 @@ _LIST_FIELDS = (
 )
 _MODEL_LIST_FIELDS = {
     "watched_models": WatchedModel,
-    "blocket_queries": BlocketQuery,
-    "tradera_queries": TraderaQuery,
 }
 _STRING_LIST_FIELDS = ("hard_criteria", "soft_criteria")
 
@@ -28,6 +26,7 @@ def _row_to_search(row: sqlite3.Row) -> Search:
         data[key] = json.loads(data[key])
     for key, model_cls in _MODEL_LIST_FIELDS.items():
         data[key] = [model_cls(**item) for item in json.loads(data[key])]
+    data["marketplace_queries"] = json.loads(data["marketplace_queries"])
     return Search(**data)
 
 
@@ -37,6 +36,7 @@ def _search_to_row(search: Search) -> dict:
         data[key] = json.dumps(data[key])
     for key in _MODEL_LIST_FIELDS:
         data[key] = json.dumps(data[key])
+    data["marketplace_queries"] = json.dumps(data["marketplace_queries"])
     data["enabled"] = int(data["enabled"])
     data["require_shipping"] = int(data["require_shipping"])
     return data

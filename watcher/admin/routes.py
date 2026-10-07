@@ -1,17 +1,21 @@
-"""Admin UI routes: search CRUD and health status, server-rendered (no JS)."""
+"""Admin UI routes: search CRUD, marketplace config, and health status -
+server-rendered (no JS)."""
 from __future__ import annotations
 
 import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from watcher import marketplace_configs as marketplace_configs_repo
 from watcher import searches as searches_repo
 from watcher import storage
-from watcher.models import BlocketQuery, Search, TraderaQuery, WatchedModel
+from watcher.marketplaces import MARKETPLACES
+from watcher.marketplaces import get as get_marketplace
+from watcher.models import Search, WatchedModel
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -42,37 +46,27 @@ def _watched_models_to_text(items: List[WatchedModel]) -> str:
     return "\n".join(f"{wm.pattern} | {wm.note} | {wm.good_price}" for wm in items)
 
 
-def _parse_blocket_queries(text: str) -> List[BlocketQuery]:
-    result = []
-    for line in _lines_to_list(text):
-        parts = [p.strip() for p in line.split("|")]
-        q = parts[0] if parts else ""
-        if not q:
-            continue
-        category = parts[1] if len(parts) > 1 and parts[1] else None
-        sub_category = parts[2] if len(parts) > 2 and parts[2] else None
-        result.append(BlocketQuery(q=q, category=category, sub_category=sub_category))
+def _parse_marketplace_queries(form_data) -> Dict[str, List[dict]]:
+    result: Dict[str, List[dict]] = {}
+    for key, marketplace in MARKETPLACES.items():
+        text = form_data.get(f"marketplace_queries__{key}", "")
+        queries = []
+        for line in _lines_to_list(text):
+            parts = [p.strip() for p in line.split("|")]
+            parsed = marketplace.parse_query_line(parts)
+            if parsed is not None:
+                queries.append(parsed.model_dump(exclude_none=True))
+        if queries:
+            result[key] = queries
     return result
 
 
-def _blocket_queries_to_text(items: List[BlocketQuery]) -> str:
-    return "\n".join(f"{q.q} | {q.category or ''} | {q.sub_category or ''}" for q in items)
-
-
-def _parse_tradera_queries(text: str) -> List[TraderaQuery]:
-    result = []
-    for line in _lines_to_list(text):
-        parts = [p.strip() for p in line.split("|")]
-        query = parts[0] if parts else ""
-        if not query:
-            continue
-        category_id = parts[1] if len(parts) > 1 and parts[1] else None
-        result.append(TraderaQuery(query=query, category_id=category_id))
+def _marketplace_queries_to_form(marketplace_queries: Dict[str, List[dict]]) -> Dict[str, str]:
+    result = {}
+    for key, marketplace in MARKETPLACES.items():
+        lines = [marketplace.query_to_line(marketplace.query_model(**raw)) for raw in marketplace_queries.get(key, [])]
+        result[key] = "\n".join(lines)
     return result
-
-
-def _tradera_queries_to_text(items: List[TraderaQuery]) -> str:
-    return "\n".join(f"{q.query} | {q.category_id or ''}" for q in items)
 
 
 def _search_to_form(search: Optional[Search]) -> dict:
@@ -81,7 +75,7 @@ def _search_to_form(search: Optional[Search]) -> dict:
             name="", enabled=True, scope="local", location="", require_shipping=False, max_price="",
             excluded_models="", excluded_words="", required_keywords="",
             hard_criteria="", soft_criteria="", watched_models="",
-            blocket_queries="", tradera_queries="",
+            marketplace_queries=_marketplace_queries_to_form({}),
         )
     return dict(
         name=search.name,
@@ -96,42 +90,26 @@ def _search_to_form(search: Optional[Search]) -> dict:
         hard_criteria=_list_to_lines(search.hard_criteria),
         soft_criteria=_list_to_lines(search.soft_criteria),
         watched_models=_watched_models_to_text(search.watched_models),
-        blocket_queries=_blocket_queries_to_text(search.blocket_queries),
-        tradera_queries=_tradera_queries_to_text(search.tradera_queries),
+        marketplace_queries=_marketplace_queries_to_form(search.marketplace_queries),
     )
 
 
-def _form_to_search(
-    name: str,
-    enabled: Optional[str],
-    scope: str,
-    location: str,
-    require_shipping: Optional[str],
-    max_price: str,
-    excluded_models: str,
-    excluded_words: str,
-    required_keywords: str,
-    hard_criteria: str,
-    soft_criteria: str,
-    watched_models: str,
-    blocket_queries: str,
-    tradera_queries: str,
-) -> Search:
+def _form_to_search(form_data) -> Search:
+    max_price = form_data.get("max_price", "")
     return Search(
-        name=name,
-        enabled=enabled is not None,
-        scope=scope,
-        location=location,
-        require_shipping=require_shipping is not None,
+        name=form_data.get("name", ""),
+        enabled=form_data.get("enabled") is not None,
+        scope=form_data.get("scope", "local"),
+        location=form_data.get("location", ""),
+        require_shipping=form_data.get("require_shipping") is not None,
         max_price=int(max_price) if max_price.strip() else None,
-        excluded_models=_lines_to_list(excluded_models),
-        excluded_words=_lines_to_list(excluded_words),
-        required_keywords=_lines_to_list(required_keywords),
-        hard_criteria=_lines_to_list(hard_criteria),
-        soft_criteria=_lines_to_list(soft_criteria),
-        watched_models=_parse_watched_models(watched_models),
-        blocket_queries=_parse_blocket_queries(blocket_queries),
-        tradera_queries=_parse_tradera_queries(tradera_queries),
+        excluded_models=_lines_to_list(form_data.get("excluded_models", "")),
+        excluded_words=_lines_to_list(form_data.get("excluded_words", "")),
+        required_keywords=_lines_to_list(form_data.get("required_keywords", "")),
+        hard_criteria=_lines_to_list(form_data.get("hard_criteria", "")),
+        soft_criteria=_lines_to_list(form_data.get("soft_criteria", "")),
+        watched_models=_parse_watched_models(form_data.get("watched_models", "")),
+        marketplace_queries=_parse_marketplace_queries(form_data),
     )
 
 
@@ -151,34 +129,18 @@ def list_searches(request: Request):
 def new_search_form(request: Request):
     return templates.TemplateResponse(
         request, "search_form.html",
-        {"form": _search_to_form(None), "is_edit": False, "action_url": "/searches/new"},
+        {
+            "form": _search_to_form(None), "is_edit": False, "action_url": "/searches/new",
+            "marketplaces": list(MARKETPLACES.values()),
+        },
     )
 
 
 @router.post("/searches/new")
-def create_search(
-    request: Request,
-    name: str = Form(...),
-    enabled: Optional[str] = Form(None),
-    scope: str = Form("local"),
-    location: str = Form(""),
-    require_shipping: Optional[str] = Form(None),
-    max_price: str = Form(""),
-    excluded_models: str = Form(""),
-    excluded_words: str = Form(""),
-    required_keywords: str = Form(""),
-    hard_criteria: str = Form(""),
-    soft_criteria: str = Form(""),
-    watched_models: str = Form(""),
-    blocket_queries: str = Form(""),
-    tradera_queries: str = Form(""),
-):
+async def create_search(request: Request):
     conn = request.app.state.conn
-    search = _form_to_search(
-        name, enabled, scope, location, require_shipping, max_price,
-        excluded_models, excluded_words, required_keywords,
-        hard_criteria, soft_criteria, watched_models, blocket_queries, tradera_queries,
-    )
+    form_data = await request.form()
+    search = _form_to_search(form_data)
     searches_repo.create_search(conn, search)
     return RedirectResponse("/searches", status_code=303)
 
@@ -189,35 +151,18 @@ def edit_search_form(request: Request, search_id: int):
     search = searches_repo.get_search(conn, search_id)
     return templates.TemplateResponse(
         request, "search_form.html",
-        {"form": _search_to_form(search), "is_edit": True, "action_url": f"/searches/{search_id}/edit"},
+        {
+            "form": _search_to_form(search), "is_edit": True, "action_url": f"/searches/{search_id}/edit",
+            "marketplaces": list(MARKETPLACES.values()),
+        },
     )
 
 
 @router.post("/searches/{search_id}/edit")
-def update_search(
-    request: Request,
-    search_id: int,
-    name: str = Form(...),
-    enabled: Optional[str] = Form(None),
-    scope: str = Form("local"),
-    location: str = Form(""),
-    require_shipping: Optional[str] = Form(None),
-    max_price: str = Form(""),
-    excluded_models: str = Form(""),
-    excluded_words: str = Form(""),
-    required_keywords: str = Form(""),
-    hard_criteria: str = Form(""),
-    soft_criteria: str = Form(""),
-    watched_models: str = Form(""),
-    blocket_queries: str = Form(""),
-    tradera_queries: str = Form(""),
-):
+async def update_search(request: Request, search_id: int):
     conn = request.app.state.conn
-    search = _form_to_search(
-        name, enabled, scope, location, require_shipping, max_price,
-        excluded_models, excluded_words, required_keywords,
-        hard_criteria, soft_criteria, watched_models, blocket_queries, tradera_queries,
-    )
+    form_data = await request.form()
+    search = _form_to_search(form_data)
     searches_repo.update_search(conn, search_id, search)
     return RedirectResponse("/searches", status_code=303)
 
@@ -238,6 +183,53 @@ def delete_search(request: Request, search_id: int):
     return RedirectResponse("/searches", status_code=303)
 
 
+@router.get("/marketplaces", response_class=HTMLResponse)
+def list_marketplaces(request: Request):
+    conn = request.app.state.conn
+    configs = {c.key: c for c in marketplace_configs_repo.list_configs(conn)}
+    rows = []
+    for key, marketplace in MARKETPLACES.items():
+        config = configs.get(key)
+        rows.append(
+            {
+                "key": key,
+                "display_name": marketplace.display_name,
+                "poll_interval_minutes": config.poll_interval_minutes if config else marketplace.default_poll_interval_minutes,
+                "request_delay_seconds": config.request_delay_seconds if config else marketplace.default_request_delay_seconds,
+                "has_auth_fields": bool(marketplace.auth_fields),
+                "auth_configured": bool(config and config.auth),
+            }
+        )
+    return templates.TemplateResponse(request, "marketplaces_list.html", {"marketplaces": rows})
+
+
+@router.get("/marketplaces/{key}/edit", response_class=HTMLResponse)
+def edit_marketplace_form(request: Request, key: str):
+    conn = request.app.state.conn
+    marketplace = get_marketplace(key)
+    if marketplace is None:
+        return RedirectResponse("/marketplaces", status_code=303)
+    config = marketplace_configs_repo.get_config(conn, key)
+    return templates.TemplateResponse(
+        request, "marketplace_form.html",
+        {"marketplace": marketplace, "config": config, "action_url": f"/marketplaces/{key}/edit"},
+    )
+
+
+@router.post("/marketplaces/{key}/edit")
+async def update_marketplace(request: Request, key: str):
+    conn = request.app.state.conn
+    marketplace = get_marketplace(key)
+    if marketplace is None:
+        return RedirectResponse("/marketplaces", status_code=303)
+    form_data = await request.form()
+    poll_interval_minutes = int(form_data.get("poll_interval_minutes") or marketplace.default_poll_interval_minutes)
+    request_delay_seconds = float(form_data.get("request_delay_seconds") or marketplace.default_request_delay_seconds)
+    auth_updates = {f.key: form_data.get(f"auth__{f.key}", "") for f in marketplace.auth_fields}
+    marketplace_configs_repo.update_config(conn, key, poll_interval_minutes, request_delay_seconds, auth_updates)
+    return RedirectResponse("/marketplaces", status_code=303)
+
+
 @router.get("/health", response_class=HTMLResponse)
 def health_page(request: Request):
     conn = request.app.state.conn
@@ -256,7 +248,6 @@ def healthz(request: Request) -> JSONResponse:
     while it's still in progress.
     """
     conn = request.app.state.conn
-    settings = request.app.state.settings
     last_run = storage.get_last_completed_run(conn)
 
     if last_run is None:
@@ -271,7 +262,8 @@ def healthz(request: Request) -> JSONResponse:
     if finished_at:
         finished_dt = datetime.datetime.strptime(finished_at, "%Y-%m-%d %H:%M:%S")
         age_minutes = (datetime.datetime.utcnow() - finished_dt).total_seconds() / 60
-        stale_after = settings.poll_interval_minutes * 3
+        configs = marketplace_configs_repo.list_configs(conn)
+        stale_after = max((c.poll_interval_minutes for c in configs), default=240) * 3
         if age_minutes > stale_after:
             return JSONResponse(
                 {"status": "unhealthy", "reason": f"last run finished {int(age_minutes)} min ago, expected within {stale_after} min"},

@@ -67,7 +67,10 @@ def _create_legacy_schema(path: str) -> None:
         """
     )
     conn.execute(
-        "INSERT INTO containers (name, max_price) VALUES ('Living room - AV receiver', 3000)"
+        """
+        INSERT INTO containers (name, max_price, blocket_queries, tradera_queries)
+        VALUES ('Living room - AV receiver', 3000, '[{"q": "onkyo tx-nr"}]', '[{"query": "onkyo receiver"}]')
+        """
     )
     conn.execute(
         """
@@ -92,6 +95,9 @@ def test_legacy_database_migrates_and_preserves_data(tmp_path):
     assert len(all_searches) == 1
     assert all_searches[0].name == "Living room - AV receiver"
     assert all_searches[0].max_price == 3000
+    # Blocket queries carry over under the "blocket" key; Tradera queries are
+    # dropped (Tradera support was removed) rather than migrated.
+    assert all_searches[0].marketplace_queries == {"blocket": [{"q": "onkyo tx-nr"}]}
 
     listing_row = conn.execute("SELECT * FROM listings").fetchone()
     assert listing_row["search_id"] == all_searches[0].id

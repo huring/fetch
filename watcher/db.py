@@ -1,12 +1,13 @@
 """SQLite connection and schema management.
 
-SQLite is the single source of truth for both search definitions (edited via
-the admin UI) and listing/run/health state. WAL mode lets the scheduler's
-background jobs and the admin UI's request handlers read/write concurrently
-without lock contention for a workload this small.
+SQLite is the single source of truth for search definitions, marketplace
+config (edited via the admin UI), and listing/run/health state. WAL mode lets
+the scheduler's background jobs and the admin UI's request handlers
+read/write concurrently without lock contention for a workload this small.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -25,9 +26,17 @@ CREATE TABLE IF NOT EXISTS searches (
     watched_models TEXT NOT NULL DEFAULT '[]',
     hard_criteria TEXT NOT NULL DEFAULT '[]',
     soft_criteria TEXT NOT NULL DEFAULT '[]',
-    blocket_queries TEXT NOT NULL DEFAULT '[]',
-    tradera_queries TEXT NOT NULL DEFAULT '[]',
+    marketplace_queries TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_configs (
+    key TEXT PRIMARY KEY,
+    poll_interval_minutes INTEGER NOT NULL,
+    request_delay_seconds REAL NOT NULL,
+    auth TEXT NOT NULL DEFAULT '{}',
+    last_fetch_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -111,6 +120,38 @@ def _migrate_legacy_names(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_blocket_tradera_queries(conn: sqlite3.Connection) -> None:
+    """One-time collapse of the old fixed ``blocket_queries``/``tradera_queries``
+    columns into the generic ``marketplace_queries`` JSON column used by the
+    marketplace registry. Tradera queries are dropped (Tradera support was
+    removed); Blocket queries carry over under the "blocket" key."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "searches" not in tables:
+        return
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(searches)")}
+    if "marketplace_queries" in columns:
+        return  # already migrated (or a fresh DB that never had the old columns)
+
+    conn.execute("ALTER TABLE searches ADD COLUMN marketplace_queries TEXT NOT NULL DEFAULT '{}'")
+
+    if "blocket_queries" in columns:
+        rows = conn.execute("SELECT id, blocket_queries FROM searches").fetchall()
+        for row in rows:
+            blocket_queries = json.loads(row["blocket_queries"] or "[]")
+            marketplace_queries = {"blocket": blocket_queries} if blocket_queries else {}
+            conn.execute(
+                "UPDATE searches SET marketplace_queries = ? WHERE id = ?",
+                (json.dumps(marketplace_queries), row["id"]),
+            )
+        conn.execute("ALTER TABLE searches DROP COLUMN blocket_queries")
+
+    if "tradera_queries" in columns:
+        conn.execute("ALTER TABLE searches DROP COLUMN tradera_queries")
+
+    conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -118,6 +159,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     _migrate_legacy_names(conn)
+    _migrate_blocket_tradera_queries(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn
