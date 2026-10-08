@@ -1,83 +1,93 @@
 {% extends "base.html" %}
-{% block title %}{{ "Edit" if is_edit else "New" }} search{% endblock %}
+{% block title %}{{ "Edit" if is_edit else "New" }} search - Fetch{% endblock %}
 {% block content %}
-<h1>{{ "Edit" if is_edit else "New" }} search</h1>
-<form method="post" action="{{ action_url }}">
-    <fieldset>
-        <legend>Basics</legend>
-        <label>Name<input type="text" name="name" value="{{ form.name }}" required></label>
-        <label><input type="checkbox" name="enabled" {{ "checked" if form.enabled else "" }} style="width:auto;display:inline;"> Enabled</label>
-        <label>Scope
-            <select name="scope">
+<h1 class="text-xl font-semibold mb-4">{{ "Edit" if is_edit else "New" }} search</h1>
+<form method="post" action="{{ action_url }}" class="space-y-4">
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Basics</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Name
+            <input type="text" name="name" value="{{ form.name }}" required class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </label>
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-300 mt-3">
+            <input type="checkbox" name="enabled" {{ "checked" if form.enabled else "" }} class="w-4 h-4 accent-indigo-500"> Enabled
+        </label>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Scope
+            <select name="scope" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
                 <option value="local" {{ "selected" if form.scope == "local" else "" }}>Local (restrict to a location)</option>
                 <option value="national" {{ "selected" if form.scope == "national" else "" }}>National (search everywhere)</option>
             </select>
         </label>
-        <label>Location <span class="hint">(used to restrict local-scope searches, e.g. a city or region name)</span>
-            <input type="text" name="location" value="{{ form.location }}">
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Location <span class="block font-normal text-xs text-gray-400">(used to restrict local-scope searches, e.g. a city or region name)</span>
+            <input type="text" name="location" value="{{ form.location }}" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
         </label>
-        <label><input type="checkbox" name="require_shipping" {{ "checked" if form.require_shipping else "" }} style="width:auto;display:inline;"> Require/prefer listings that ship <span class="hint">(mainly relevant for national scope)</span></label>
-        <label>Max price (SEK) <span class="hint">(deterministic filter, applied before any AI scoring)</span>
-            <input type="number" name="max_price" value="{{ form.max_price }}">
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-300 mt-3">
+            <input type="checkbox" name="require_shipping" {{ "checked" if form.require_shipping else "" }} class="w-4 h-4 accent-indigo-500"> Require/prefer listings that ship <span class="font-normal text-xs text-gray-400">(mainly relevant for national scope)</span>
         </label>
-        <label>Min price (SEK) <span class="hint">(deterministic filter - screens out suspiciously-cheap listings, e.g. a lone accessory rather than the item itself; leave blank for no floor)</span>
-            <input type="number" name="min_price" value="{{ form.min_price }}">
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Max price (SEK) <span class="block font-normal text-xs text-gray-400">(deterministic filter, applied before any AI scoring)</span>
+            <input type="number" name="max_price" value="{{ form.max_price }}" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
         </label>
-        <label><input type="checkbox" id="scoring_mode_rated" name="scoring_mode" value="rated" {{ "checked" if form.scoring_mode == "rated" else "" }} style="width:auto;display:inline;"> AI-rated <span class="hint">(off: a plain browsable list with no Claude involved, just the filters below - on: Claude also scores and reasons about every match using the criteria further down)</span></label>
-    </fieldset>
-
-    <fieldset id="plain-fields">
-        <legend>Plain search alerting</legend>
-        <label>Instant alert price (SEK) <span class="hint">(a match at or below this price pings Slack immediately instead of waiting for the daily digest; leave blank to only ever appear in the digest)</span>
-            <input type="number" name="instant_alert_price" value="{{ form.instant_alert_price }}">
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Min price (SEK) <span class="block font-normal text-xs text-gray-400">(deterministic filter - screens out suspiciously-cheap listings, e.g. a lone accessory rather than the item itself; leave blank for no floor)</span>
+            <input type="number" name="min_price" value="{{ form.min_price }}" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
+        </label>
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-300 mt-3">
+            <input type="checkbox" id="scoring_mode_rated" name="scoring_mode" value="rated" {{ "checked" if form.scoring_mode == "rated" else "" }} class="w-4 h-4 accent-indigo-500">
+            AI-rated <span class="font-normal text-xs text-gray-400">(off: a plain browsable list with no Claude involved, just the filters below - on: Claude also scores and reasons about every match using the criteria further down)</span>
         </label>
     </fieldset>
 
-    <fieldset>
-        <legend>Deterministic prefilter</legend>
-        <label>Excluded models <span class="hint">(wildcard patterns, one per line, e.g. TX-SR6*)</span>
-            <textarea name="excluded_models">{{ form.excluded_models }}</textarea>
-        </label>
-        <label>Excluded words <span class="hint">(one per line, matched against title/description)</span>
-            <textarea name="excluded_words">{{ form.excluded_words }}</textarea>
-        </label>
-        <label>Required keywords <span class="hint">(one per line; at least one must appear - leave empty to require none)</span>
-            <textarea name="required_keywords">{{ form.required_keywords }}</textarea>
+    <fieldset id="plain-fields" class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Plain search alerting</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Instant alert price (SEK) <span class="block font-normal text-xs text-gray-400">(a match at or below this price pings Slack immediately instead of waiting for the daily digest; leave blank to only ever appear in the digest)</span>
+            <input type="number" name="instant_alert_price" value="{{ form.instant_alert_price }}" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
         </label>
     </fieldset>
 
-    <fieldset id="rated-fields">
-        <legend>Criteria for Claude's scoring</legend>
-        <label>Hard requirements <span class="hint">(one per line, free text, e.g. "HDCP 2.2 passthrough required")</span>
-            <textarea name="hard_criteria">{{ form.hard_criteria }}</textarea>
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Deterministic prefilter</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Excluded models <span class="block font-normal text-xs text-gray-400">(wildcard patterns, one per line, e.g. TX-SR6*)</span>
+            <textarea name="excluded_models" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 font-mono text-xs min-h-[4.5rem]">{{ form.excluded_models }}</textarea>
         </label>
-        <label>Soft criteria / nice-to-haves <span class="hint">(one per line)</span>
-            <textarea name="soft_criteria">{{ form.soft_criteria }}</textarea>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Excluded words <span class="block font-normal text-xs text-gray-400">(one per line, matched against title/description)</span>
+            <textarea name="excluded_words" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 font-mono text-xs min-h-[4.5rem]">{{ form.excluded_words }}</textarea>
         </label>
-        <label>Watched models <span class="hint">(one per line: <code>pattern | note | good price | ideal</code> - leave the last part blank for a normal watched model, or write <code>ideal</code> to mark it as your buy-it-now/grail target: if genuinely found at or below its good price, Claude scores it 10/10 and judges every other candidate in this search against it. e.g. <code>TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK |</code> or <code>RTX 4080 | the one I actually want | 7000-8000 SEK | ideal</code>)</span>
-            <textarea name="watched_models">{{ form.watched_models }}</textarea>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Required keywords <span class="block font-normal text-xs text-gray-400">(one per line; at least one must appear - leave empty to require none)</span>
+            <textarea name="required_keywords" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 font-mono text-xs min-h-[4.5rem]">{{ form.required_keywords }}</textarea>
         </label>
     </fieldset>
 
-    <fieldset>
-        <legend>Search terms</legend>
-        <label>Search phrases <span class="hint">(one per line - run on every marketplace selected below)</span>
-            <textarea name="search_phrases">{{ form.search_phrases }}</textarea>
+    <fieldset id="rated-fields" class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Criteria for Claude's scoring</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Hard requirements <span class="block font-normal text-xs text-gray-400">(one per line, free text, e.g. "HDCP 2.2 passthrough required")</span>
+            <textarea name="hard_criteria" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 font-mono text-xs min-h-[4.5rem]">{{ form.hard_criteria }}</textarea>
         </label>
-        <label>Marketplaces
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Soft criteria / nice-to-haves <span class="block font-normal text-xs text-gray-400">(one per line)</span>
+            <textarea name="soft_criteria" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 font-mono text-xs min-h-[4.5rem]">{{ form.soft_criteria }}</textarea>
+        </label>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Watched models <span class="block font-normal text-xs text-gray-400">(one per line: <code>pattern | note | good price | ideal</code> - leave the last part blank for a normal watched model, or write <code>ideal</code> to mark it as your buy-it-now/grail target: if genuinely found at or below its good price, Claude scores it 10/10 and judges every other candidate in this search against it. e.g. <code>TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK |</code> or <code>RTX 4080 | the one I actually want | 7000-8000 SEK | ideal</code>)</span>
+            <textarea name="watched_models" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 font-mono text-xs min-h-[6rem]">{{ form.watched_models }}</textarea>
+        </label>
+    </fieldset>
+
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Search terms</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Search phrases <span class="block font-normal text-xs text-gray-400">(one per line - run on every marketplace selected below)</span>
+            <textarea name="search_phrases" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 font-mono text-xs min-h-[4.5rem]">{{ form.search_phrases }}</textarea>
+        </label>
+        <div class="mt-3">
+            <span class="block text-sm font-medium text-gray-300 mb-1">Marketplaces</span>
             {% for m in marketplaces %}
-            <span style="display:block;">
-                <input type="checkbox" name="marketplaces" value="{{ m.key }}" {{ "checked" if m.key in form.marketplaces else "" }} style="width:auto;display:inline;"> {{ m.display_name }}
-            </span>
+            <label class="flex items-center gap-2 text-sm text-gray-300 mt-1">
+                <input type="checkbox" name="marketplaces" value="{{ m.key }}" {{ "checked" if m.key in form.marketplaces else "" }} class="w-4 h-4 accent-indigo-500"> {{ m.display_name }}
+            </label>
             {% else %}
-            <span class="muted">No marketplaces registered.</span>
+            <span class="text-sm text-gray-400">No marketplaces registered.</span>
             {% endfor %}
-        </label>
+        </div>
     </fieldset>
 
-    <div class="actions">
-        <button type="submit">Save</button>
-        <a class="button secondary" href="/searches">Cancel</a>
+    <div class="flex gap-3">
+        <button type="submit" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">Save</button>
+        <a href="/searches" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Cancel</a>
     </div>
 </form>
 <script>

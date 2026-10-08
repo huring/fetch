@@ -118,7 +118,12 @@ def list_searches(request: Request):
     settings = request.app.state.settings
     all_searches = searches_repo.list_searches(conn)
     counts = storage.get_search_bucket_counts(conn, settings.score_digest_min, settings.score_instant_threshold)
-    return templates.TemplateResponse(request, "searches_list.html", {"searches": all_searches, "counts": counts})
+    overview = storage.get_overview_stats(conn, settings.score_digest_min, settings.score_instant_threshold)
+    top_listings = storage.get_top_listings(conn)
+    return templates.TemplateResponse(
+        request, "searches_list.html",
+        {"searches": all_searches, "counts": counts, "overview": overview, "top_listings": top_listings},
+    )
 
 
 def _age_days(first_seen_at: Optional[str]) -> Optional[int]:
@@ -140,7 +145,31 @@ def search_listings(request: Request, search_id: int, bucket: str = "found"):
     )
     listings = [dict(row, age_days=_age_days(row["first_seen_at"])) for row in rows]
     return templates.TemplateResponse(
-        request, "search_listings.html", {"search": search, "bucket": bucket, "listings": listings},
+        request, "search_listings.html",
+        {
+            "search": search, "bucket": bucket, "bucket_label": storage.BUCKET_LABELS[bucket],
+            "listings": listings,
+        },
+    )
+
+
+@router.get("/feed", response_class=HTMLResponse)
+def feed(request: Request, bucket: str = "daily_roundup", search_id: Optional[int] = None):
+    conn = request.app.state.conn
+    settings = request.app.state.settings
+    if bucket not in ("daily_roundup", "instant_alert"):
+        bucket = "daily_roundup"
+    rows = storage.list_feed_listings(
+        conn, bucket, settings.score_digest_min, settings.score_instant_threshold, search_id=search_id
+    )
+    listings = [dict(row, age_days=_age_days(row["first_seen_at"])) for row in rows]
+    all_searches = searches_repo.list_searches(conn)
+    return templates.TemplateResponse(
+        request, "feed.html",
+        {
+            "listings": listings, "bucket": bucket, "bucket_label": storage.BUCKET_LABELS[bucket],
+            "searches": all_searches, "selected_search_id": search_id,
+        },
     )
 
 

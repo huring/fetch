@@ -1,35 +1,35 @@
 {% extends "base.html" %}
-{% block title %}{{ marketplace.display_name }}{% endblock %}
+{% block title %}{{ marketplace.display_name }} - Fetch{% endblock %}
 {% block content %}
-<h1>{{ marketplace.display_name }}</h1>
-<form method="post" action="{{ action_url }}">
-    <fieldset>
-        <legend>Polling</legend>
-        <label>Poll interval (minutes) <span class="hint">(how often this marketplace's searches are fetched)</span>
-            <input type="number" name="poll_interval_minutes" value="{{ config.poll_interval_minutes if config else marketplace.default_poll_interval_minutes }}">
+<h1 class="text-xl font-semibold mb-4">{{ marketplace.display_name }}</h1>
+<form method="post" action="{{ action_url }}" class="space-y-4">
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Polling</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Poll interval (minutes) <span class="block font-normal text-xs text-gray-400">(how often this marketplace's searches are fetched)</span>
+            <input type="number" name="poll_interval_minutes" value="{{ config.poll_interval_minutes if config else marketplace.default_poll_interval_minutes }}" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
         </label>
-        <label>Request delay (seconds) <span class="hint">(pause between individual requests to this marketplace)</span>
-            <input type="number" step="0.1" name="request_delay_seconds" value="{{ config.request_delay_seconds if config else marketplace.default_request_delay_seconds }}">
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Request delay (seconds) <span class="block font-normal text-xs text-gray-400">(pause between individual requests to this marketplace)</span>
+            <input type="number" step="0.1" name="request_delay_seconds" value="{{ config.request_delay_seconds if config else marketplace.default_request_delay_seconds }}" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
         </label>
     </fieldset>
 
     {% if marketplace.auth_fields %}
-    <fieldset>
-        <legend>Authentication</legend>
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Authentication</legend>
         {% for f in marketplace.auth_fields %}
-        <label>{{ f.label }}
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">{{ f.label }}
             {% if config and config.auth.get(f.key) %}
-                <span class="hint">(currently set - leave blank to keep it)</span>
+                <span class="block font-normal text-xs text-gray-400">(currently set - leave blank to keep it)</span>
             {% endif %}
-            <input type="{{ 'password' if f.secret else 'text' }}" name="auth__{{ f.key }}" value="" autocomplete="off">
+            <input type="{{ 'password' if f.secret else 'text' }}" name="auth__{{ f.key }}" value="" autocomplete="off" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
         </label>
         {% endfor %}
     </fieldset>
     {% endif %}
 
-    <div class="actions">
-        <button type="submit">Save</button>
-        <a class="button secondary" href="/marketplaces">Cancel</a>
+    <div class="flex gap-3">
+        <button type="submit" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">Save</button>
+        <a href="/marketplaces" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Cancel</a>
     </div>
 </form>
 {% endblock %}

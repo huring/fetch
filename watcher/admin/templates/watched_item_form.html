@@ -1,33 +1,38 @@
 {% extends "base.html" %}
-{% block title %}{{ "Edit" if is_edit else "New" }} watched item{% endblock %}
+{% block title %}{{ "Edit" if is_edit else "New" }} watched item - Fetch{% endblock %}
 {% block content %}
-<h1>{{ "Edit" if is_edit else "New" }} watched item</h1>
-<form method="post" action="{{ action_url }}">
-    <fieldset>
-        <legend>Basics</legend>
-        <label>Name <span class="hint">(your own label, e.g. "VU meter")</span>
-            <input type="text" name="name" value="{{ form.name }}" required>
+<h1 class="text-xl font-semibold mb-4">{{ "Edit" if is_edit else "New" }} watched item</h1>
+<form method="post" action="{{ action_url }}" class="space-y-4">
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Basics</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Name <span class="block font-normal text-xs text-gray-400">(your own label, e.g. "VU meter")</span>
+            <input type="text" name="name" value="{{ form.name }}" required class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
         </label>
-        <label>Product URL
-            <input type="text" name="url" value="{{ form.url }}" required>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Product URL
+            <input type="text" name="url" value="{{ form.url }}" required class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
         </label>
-        <label><input type="checkbox" name="enabled" {{ "checked" if form.enabled else "" }} style="width:auto;display:inline;"> Enabled</label>
-        <label>Target price (SEK) <span class="hint">(alert the moment the price is at or below this - leave blank to just track price history with no alert)</span>
-            <input type="number" name="target_price" value="{{ form.target_price }}">
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-300 mt-3">
+            <input type="checkbox" name="enabled" {{ "checked" if form.enabled else "" }} class="w-4 h-4 accent-indigo-500"> Enabled
         </label>
-        <label>Check frequency <span class="hint">(price drops aren't time-sensitive - daily is the default, but weekly/monthly works just as well)</span>
-            <select name="check_frequency">
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Target price (SEK) <span class="block font-normal text-xs text-gray-400">(alert the moment the price is at or below this - leave blank to just track price history with no alert)</span>
+            <input type="number" name="target_price" value="{{ form.target_price }}" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
+        </label>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Check frequency <span class="block font-normal text-xs text-gray-400">(price drops aren't time-sensitive - daily is the default, but weekly/monthly works just as well)</span>
+            <select name="check_frequency" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
                 <option value="daily" {{ "selected" if form.check_frequency == "daily" else "" }}>Daily</option>
                 <option value="weekly" {{ "selected" if form.check_frequency == "weekly" else "" }}>Weekly</option>
                 <option value="monthly" {{ "selected" if form.check_frequency == "monthly" else "" }}>Monthly</option>
             </select>
         </label>
-        <label><input type="checkbox" name="find_used" {{ "checked" if form.find_used else "" }} style="width:auto;display:inline;"> Find this item used <span class="hint">(also search Blocket/Vinted/Rehifi for a used copy once the product's title is known from the first check, alerting at or below the same target price)</span></label>
+        <label class="flex items-center gap-2 text-sm font-medium text-gray-300 mt-3">
+            <input type="checkbox" name="find_used" {{ "checked" if form.find_used else "" }} class="w-4 h-4 accent-indigo-500">
+            Find this item used <span class="font-normal text-xs text-gray-400">(also search Blocket/Vinted/Rehifi for a used copy once the product's title is known from the first check, alerting at or below the same target price)</span>
+        </label>
     </fieldset>
 
-    <div class="actions">
-        <button type="submit">Save</button>
-        <a class="button secondary" href="/watched-items">Cancel</a>
+    <div class="flex gap-3">
+        <button type="submit" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">Save</button>
+        <a href="/watched-items" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Cancel</a>
     </div>
 </form>
 {% endblock %}

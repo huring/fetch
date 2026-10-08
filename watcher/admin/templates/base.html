@@ -1,33 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="utf-8">
-    <title>{% block title %}Watcher admin{% endblock %}</title>
-    <style>
-        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
-        h1 { font-size: 1.4rem; }
-        table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
-        th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
-        .muted { color: #666; font-size: 0.9rem; }
-        .pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.8rem; }
-        .pill.on { background: #d4f5dd; color: #136c2e; }
-        .pill.off { background: #eee; color: #777; }
-        form.inline { display: inline; }
-        fieldset { margin-bottom: 1.2rem; border: 1px solid #ddd; border-radius: 6px; }
-        legend { font-weight: 600; padding: 0 0.4rem; }
-        label { display: block; margin: 0.6rem 0 0.2rem; font-weight: 600; }
-        .hint { font-weight: normal; color: #666; font-size: 0.85rem; }
-        input[type=text], input[type=number], select, textarea { width: 100%; padding: 0.4rem; box-sizing: border-box; font-family: inherit; }
-        textarea { min-height: 4.5rem; font-family: ui-monospace, monospace; font-size: 0.85rem; }
-        .actions { margin-top: 1rem; }
-        button, .button { background: #1a1a1a; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
-        button.secondary, .button.secondary { background: #eee; color: #1a1a1a; }
-        button.danger { background: #b3261e; }
-        nav a { margin-right: 1rem; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Fetch{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Dark theme only (no light-theme toggle needed) - forced via
+        // tailwind.config rather than relying on the OS/browser preference,
+        // so it always looks the same regardless of the viewer's own setting.
+        tailwind.config = { darkMode: "class" };
+    </script>
 </head>
-<body>
-    <nav><a href="/searches">Searches</a><a href="/watched-items">Watched items</a><a href="/marketplaces">Marketplaces</a><a href="/health">Health</a></nav>
-    {% block content %}{% endblock %}
+<body class="dark bg-gray-900 text-gray-100 min-h-screen">
+    <nav class="bg-gray-800 border-b border-gray-700">
+        <div class="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <span class="font-semibold tracking-tight text-gray-100">Fetch</span>
+            <a href="/searches" class="text-gray-300 hover:text-white text-sm">Searches</a>
+            <a href="/feed" class="text-gray-300 hover:text-white text-sm">Feed</a>
+            <a href="/watched-items" class="text-gray-300 hover:text-white text-sm">Watched items</a>
+            <a href="/marketplaces" class="text-gray-300 hover:text-white text-sm">Marketplaces</a>
+            <a href="/health" class="text-gray-300 hover:text-white text-sm">Health</a>
+        </div>
+    </nav>
+    <main class="max-w-5xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
 </body>
 </html>

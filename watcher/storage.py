@@ -282,13 +282,19 @@ def get_pending_plain_digest(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     ).fetchall()
 
 
-BUCKETS = ("found", "summary", "threshold")
+BUCKETS = ("found", "daily_roundup", "instant_alert")
+
+# UI display labels only (decided 2026-10-08, backlog item 18) - code/internal
+# references use "daily_roundup"/"instant_alert" (named after when you're
+# notified, matching SCORE_DIGEST_MIN/SCORE_INSTANT_THRESHOLD directly), the
+# admin UI itself shows the terser "Maybe"/"Yes!" instead.
+BUCKET_LABELS = {"found": "Found", "daily_roundup": "Maybe", "instant_alert": "Yes!"}
 
 
 def _bucket_predicate(bucket: str, score_digest_min: int, score_instant_threshold: int) -> str:
-    if bucket == "threshold":
+    if bucket == "instant_alert":
         return f"score >= {score_instant_threshold}"
-    if bucket == "summary":
+    if bucket == "daily_roundup":
         return f"score BETWEEN {score_digest_min} AND {score_instant_threshold - 1}"
     if bucket == "found":
         return "score IS NOT NULL AND score != 0"
@@ -301,21 +307,23 @@ def get_search_bucket_counts(
     """Counts of currently-active (not removed/sold) listings per search, for
     each of the three admin-UI buckets: "found" (passed the deterministic
     prefilter, i.e. within max-price/excluded-model thresholds, regardless of
-    score), "summary" (scored in the digest range) and "threshold" (scored at
-    or above the instant-notify threshold)."""
+    score), "daily_roundup" (scored in the digest range) and "instant_alert"
+    (scored at or above the instant-notify threshold)."""
     rows = conn.execute(
         f"""
         SELECT
             search_id,
             SUM(CASE WHEN {_bucket_predicate('found', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS found,
-            SUM(CASE WHEN {_bucket_predicate('summary', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS summary,
-            SUM(CASE WHEN {_bucket_predicate('threshold', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS threshold
+            SUM(CASE WHEN {_bucket_predicate('daily_roundup', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS daily_roundup,
+            SUM(CASE WHEN {_bucket_predicate('instant_alert', score_digest_min, score_instant_threshold)} THEN 1 ELSE 0 END) AS instant_alert
         FROM listings
         GROUP BY search_id
         """
     ).fetchall()
     return {
-        row["search_id"]: {"found": row["found"], "summary": row["summary"], "threshold": row["threshold"]}
+        row["search_id"]: {
+            "found": row["found"], "daily_roundup": row["daily_roundup"], "instant_alert": row["instant_alert"]
+        }
         for row in rows
     }
 
@@ -327,6 +335,78 @@ def list_bucket_listings(
     return conn.execute(
         f"SELECT * FROM listings WHERE search_id = ? AND {predicate} ORDER BY score DESC, first_seen_at DESC",
         (search_id,),
+    ).fetchall()
+
+
+def list_feed_listings(
+    conn: sqlite3.Connection,
+    bucket: str,
+    score_digest_min: int,
+    score_instant_threshold: int,
+    search_id: Optional[int] = None,
+) -> List[sqlite3.Row]:
+    """Like list_bucket_listings, but across every search at once (optionally
+    narrowed to one) rather than one search at a time - the cross-search feed
+    (backlog item 17)."""
+    predicate = _bucket_predicate(bucket, score_digest_min, score_instant_threshold)
+    query = f"""
+        SELECT listings.*, searches.name AS search_name
+        FROM listings
+        JOIN searches ON searches.id = listings.search_id
+        WHERE {predicate}
+    """
+    params: List[int] = []
+    if search_id is not None:
+        query += " AND listings.search_id = ?"
+        params.append(search_id)
+    query += " ORDER BY listings.score DESC, listings.first_seen_at DESC"
+    return conn.execute(query, params).fetchall()
+
+
+def get_overview_stats(conn: sqlite3.Connection, score_digest_min: int, score_instant_threshold: int) -> dict:
+    """Aggregate, across-all-searches numbers for the searches page's
+    overview panel (backlog item 16): current month's Claude cost (cost only
+    - the token counts aren't the interesting number for an at-a-glance
+    panel, see monthly_cost_summary for those), and total scanned/found/
+    daily-roundup-bucket listing counts."""
+    total_scanned = conn.execute("SELECT COUNT(*) AS n FROM listings").fetchone()["n"]
+    found_predicate = _bucket_predicate("found", score_digest_min, score_instant_threshold)
+    roundup_predicate = _bucket_predicate("daily_roundup", score_digest_min, score_instant_threshold)
+    row = conn.execute(
+        f"""
+        SELECT
+            SUM(CASE WHEN {found_predicate} THEN 1 ELSE 0 END) AS found,
+            SUM(CASE WHEN {roundup_predicate} THEN 1 ELSE 0 END) AS daily_roundup
+        FROM listings
+        """
+    ).fetchone()
+    cost_row = conn.execute(
+        "SELECT SUM(cost_usd) AS cost FROM token_usage WHERE strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')"
+    ).fetchone()
+    return {
+        "monthly_cost_usd": cost_row["cost"] or 0.0,
+        "total_scanned": total_scanned,
+        "total_found": row["found"] or 0,
+        "total_daily_roundup": row["daily_roundup"] or 0,
+    }
+
+
+def get_top_listings(conn: sqlite3.Connection, limit: int = 5) -> List[sqlite3.Row]:
+    """The highest-scored currently-active listings across every search, for
+    the searches page's overview panel's "top ads" (backlog item 16). Only
+    AI-rated listings have a meaningful ranking by score - a plain search's
+    surfaced matches (score -1) are never "top", there's nothing to rank them
+    by."""
+    return conn.execute(
+        """
+        SELECT listings.*, searches.name AS search_name
+        FROM listings
+        JOIN searches ON searches.id = listings.search_id
+        WHERE listings.score BETWEEN 1 AND 10
+        ORDER BY listings.score DESC, listings.first_seen_at DESC
+        LIMIT ?
+        """,
+        (limit,),
     ).fetchall()
 
 

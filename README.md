@@ -86,6 +86,12 @@ input/output tokens and dollar cost, logged per completed scoring batch.
 
 ## Searches and the admin UI
 
+The admin UI is server-rendered Jinja2 (no frontend build step) styled with
+Tailwind's CDN script (`<script src="...cdn.tailwindcss.com">`, compiled in
+the browser rather than a build-time pipeline - deliberately, to keep this
+project's "no Node toolchain" simplicity) and a fixed dark theme (no
+light-theme toggle - there isn't one to maintain).
+
 Everything you watch for is a **search**: a name, a scope (local/national + a
 location), whether shipping should be required, a deterministic prefilter
 (min/max price / excluded models / excluded words / required keywords), and a
@@ -144,14 +150,23 @@ or it'll get silently filtered out before Claude ever sees it.
 
 The search list shows three counts per search, each a link to the actual
 listings behind it (so you can check what's there without going via Slack).
-A plain search only ever populates **Found** - **Summary**/**Above
-threshold** are shown as "-" since there's no Claude score to bucket by:
+A plain search only ever populates **Found** - **Maybe**/**Yes!** are shown
+as "-" since there's no Claude score to bucket by. These three are called
+"found"/"daily_roundup"/"instant_alert" in code (named after *when* you're
+notified, matching `SCORE_DIGEST_MIN`/`SCORE_INSTANT_THRESHOLD` directly) -
+the admin UI just shows the terser "Found"/"Maybe"/"Yes!" instead:
 
 - **Found** - listings that passed the deterministic prefilter (within the
   max-price/excluded-model rules), regardless of Claude's score.
-- **Summary** - listings scored in the digest range (`SCORE_DIGEST_MIN` to
+- **Maybe** - listings scored in the digest range (`SCORE_DIGEST_MIN` to
   one below the instant threshold).
-- **Above threshold** - listings scored at or above `SCORE_INSTANT_THRESHOLD`.
+- **Yes!** - listings scored at or above `SCORE_INSTANT_THRESHOLD`.
+
+The searches page also has an overview panel (this month's Claude cost,
+total scanned/found/"Maybe" counts, and the current top-scoring ads across
+every search) and a **Feed** page (`/feed`) that shows every search's
+"Maybe" (or, toggled, "Yes!") listings together on one page instead of
+clicking into each search individually - filterable to one specific search.
 
 All three only count currently-active listings - one confirmed sold/removed
 by the daily liveness sweep (see "How it works" above) disappears from every

@@ -1,43 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Watched items{% endblock %}
+{% block title %}Watched items - Fetch{% endblock %}
 {% block content %}
-<h1>Watched items</h1>
-<p class="muted">Tracks one exact product URL for a price drop, independent of the searches above - no AI rating involved except a single call to read the page's price.</p>
-{% if checked %}<p class="muted">Triggered a manual check - results appear below once it finishes (usually seconds).</p>{% endif %}
-<p class="actions"><a class="button" href="/watched-items/new">+ New watched item</a></p>
-<table>
-    <thead>
-        <tr>
-            <th>Name</th><th>Current price</th><th>Target</th><th>Lowest seen</th>
-            <th>Frequency</th><th>Find used</th><th>Status</th><th>Last checked</th><th></th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for i in items %}
-        <tr>
-            <td><a href="/watched-items/{{ i.id }}/edit">{{ i.name }}</a> <a class="muted" href="{{ i.url }}" target="_blank" rel="noopener">&#8599;</a></td>
-            <td>{{ i.current_price if i.current_price is not none else "-" }}</td>
-            <td>{{ i.target_price if i.target_price is not none else "-" }}</td>
-            <td>{{ i.lowest_price_seen if i.lowest_price_seen is not none else "-" }}</td>
-            <td>{{ i.check_frequency }}</td>
-            <td>{{ "yes" if i.find_used else "-" }}</td>
-            <td><span class="pill {{ 'on' if i.enabled else 'off' }}">{{ 'enabled' if i.enabled else 'disabled' }}</span></td>
-            <td>{{ i.last_checked_at or "never" }}</td>
-            <td>
-                <form class="inline" method="post" action="/watched-items/{{ i.id }}/check">
-                    <button class="secondary" type="submit">Check now</button>
-                </form>
-                <form class="inline" method="post" action="/watched-items/{{ i.id }}/toggle">
-                    <button class="secondary" type="submit">{{ 'Disable' if i.enabled else 'Enable' }}</button>
-                </form>
-                <form class="inline" method="post" action="/watched-items/{{ i.id }}/delete" onsubmit="return confirm('Delete {{ i.name }}?');">
-                    <button class="danger" type="submit">Delete</button>
-                </form>
-            </td>
-        </tr>
-    {% else %}
-        <tr><td colspan="9" class="muted">No watched items yet.</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
+<h1 class="text-xl font-semibold mb-1">Watched items</h1>
+<p class="text-sm text-gray-400 mb-1">Tracks one exact product URL for a price drop, independent of the searches above - no AI rating involved except a single call to read the page's price.</p>
+{% if checked %}<p class="text-sm text-gray-400 mb-1">Triggered a manual check - results appear below once it finishes (usually seconds).</p>{% endif %}
+<div class="mb-6"><a href="/watched-items/new" class="inline-flex items-center px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">+ New watched item</a></div>
+<div class="overflow-x-auto bg-gray-800 border border-gray-700 rounded-lg">
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
+                <th class="px-3 py-2">Name</th><th class="px-3 py-2">Current price</th><th class="px-3 py-2">Target</th><th class="px-3 py-2">Lowest seen</th>
+                <th class="px-3 py-2">Frequency</th><th class="px-3 py-2">Find used</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">Last checked</th><th class="px-3 py-2"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+        {% for i in items %}
+            <tr>
+                <td class="px-3 py-2"><a href="/watched-items/{{ i.id }}/edit" class="text-indigo-300 hover:text-indigo-200">{{ i.name }}</a> <a class="text-gray-400 hover:text-gray-200" href="{{ i.url }}" target="_blank" rel="noopener">&#8599;</a></td>
+                <td class="px-3 py-2">{{ i.current_price if i.current_price is not none else "-" }}</td>
+                <td class="px-3 py-2">{{ i.target_price if i.target_price is not none else "-" }}</td>
+                <td class="px-3 py-2">{{ i.lowest_price_seen if i.lowest_price_seen is not none else "-" }}</td>
+                <td class="px-3 py-2">{{ i.check_frequency }}</td>
+                <td class="px-3 py-2">{{ "yes" if i.find_used else "-" }}</td>
+                <td class="px-3 py-2"><span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {{ 'bg-green-900 text-green-300' if i.enabled else 'bg-gray-700 text-gray-400' }}">{{ 'enabled' if i.enabled else 'disabled' }}</span></td>
+                <td class="px-3 py-2">{{ i.last_checked_at or "never" }}</td>
+                <td class="px-3 py-2 whitespace-nowrap">
+                    <form class="inline" method="post" action="/watched-items/{{ i.id }}/check">
+                        <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">Check now</button>
+                    </form>
+                    <form class="inline" method="post" action="/watched-items/{{ i.id }}/toggle">
+                        <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">{{ 'Disable' if i.enabled else 'Enable' }}</button>
+                    </form>
+                    <form class="inline" method="post" action="/watched-items/{{ i.id }}/delete" onsubmit="return confirm('Delete {{ i.name }}?');">
+                        <button class="px-2 py-1 rounded-md bg-red-900 hover:bg-red-800 text-red-200 text-xs" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="9" class="px-3 py-6 text-center text-gray-400">No watched items yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

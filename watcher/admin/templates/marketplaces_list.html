@@ -1,36 +1,40 @@
 {% extends "base.html" %}
-{% block title %}Marketplaces{% endblock %}
+{% block title %}Marketplaces - Fetch{% endblock %}
 {% block content %}
-<h1>Marketplaces</h1>
-<p class="muted">Where searches are run and how often. Attach a marketplace to a search under that search's "Marketplaces" section.</p>
-{% if ran %}<p class="pill on">Triggered a manual run for {{ ran }} - check <a href="/health">Health</a> shortly.</p>{% endif %}
-<table>
-    <thead>
-        <tr><th>Name</th><th>Poll interval</th><th>Request delay</th><th>Auth</th><th></th></tr>
-    </thead>
-    <tbody>
-    {% for m in marketplaces %}
-        <tr>
-            <td>{{ m.display_name }}</td>
-            <td>{{ m.poll_interval_minutes }} min</td>
-            <td>{{ m.request_delay_seconds }}s</td>
-            <td>
-                {% if m.has_auth_fields %}
-                    <span class="pill {{ 'on' if m.auth_configured else 'off' }}">{{ 'configured' if m.auth_configured else 'not set' }}</span>
-                {% else %}
-                    <span class="muted">none needed</span>
-                {% endif %}
-            </td>
-            <td>
-                <a class="button secondary" href="/marketplaces/{{ m.key }}/edit">Edit</a>
-                <form class="inline" method="post" action="/marketplaces/{{ m.key }}/run">
-                    <button class="secondary" type="submit">Run now</button>
-                </form>
-            </td>
-        </tr>
-    {% else %}
-        <tr><td colspan="5" class="muted">No marketplaces registered.</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
+<h1 class="text-xl font-semibold mb-1">Marketplaces</h1>
+<p class="text-sm text-gray-400 mb-4">Where searches are run and how often. Attach a marketplace to a search under that search's "Marketplaces" section.</p>
+{% if ran %}<p class="inline-flex px-3 py-1.5 rounded-md bg-green-900 text-green-300 text-sm mb-4">Triggered a manual run for {{ ran }} - check <a href="/health" class="underline">Health</a> shortly.</p>{% endif %}
+<div class="overflow-x-auto bg-gray-800 border border-gray-700 rounded-lg">
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
+                <th class="px-3 py-2">Name</th><th class="px-3 py-2">Poll interval</th><th class="px-3 py-2">Request delay</th><th class="px-3 py-2">Auth</th><th class="px-3 py-2"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+        {% for m in marketplaces %}
+            <tr>
+                <td class="px-3 py-2">{{ m.display_name }}</td>
+                <td class="px-3 py-2">{{ m.poll_interval_minutes }} min</td>
+                <td class="px-3 py-2">{{ m.request_delay_seconds }}s</td>
+                <td class="px-3 py-2">
+                    {% if m.has_auth_fields %}
+                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {{ 'bg-green-900 text-green-300' if m.auth_configured else 'bg-gray-700 text-gray-400' }}">{{ 'configured' if m.auth_configured else 'not set' }}</span>
+                    {% else %}
+                        <span class="text-gray-400">none needed</span>
+                    {% endif %}
+                </td>
+                <td class="px-3 py-2 whitespace-nowrap">
+                    <a href="/marketplaces/{{ m.key }}/edit" class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs">Edit</a>
+                    <form class="inline" method="post" action="/marketplaces/{{ m.key }}/run">
+                        <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">Run now</button>
+                    </form>
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="5" class="px-3 py-6 text-center text-gray-400">No marketplaces registered.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

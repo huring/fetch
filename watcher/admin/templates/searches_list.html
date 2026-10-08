@@ -1,44 +1,86 @@
 {% extends "base.html" %}
-{% block title %}Searches{% endblock %}
+{% block title %}Searches - Fetch{% endblock %}
 {% block content %}
-<h1>Searches</h1>
-<p class="actions"><a class="button" href="/searches/new">+ New search</a></p>
-<table>
-    <thead>
-        <tr>
-            <th>Name</th><th>Scope</th><th>Location</th><th>Status</th><th>Mode</th>
-            <th>Found</th><th>Summary</th><th>Above threshold</th><th></th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for s in searches %}
-        {% set c = counts.get(s.id, {}) %}
-        <tr>
-            <td><a href="/searches/{{ s.id }}/edit">{{ s.name }}</a></td>
-            <td>{{ s.scope }}{% if s.require_shipping %} <span class="muted">(shipping required)</span>{% endif %}</td>
-            <td>{{ s.location or "-" }}</td>
-            <td><span class="pill {{ 'on' if s.enabled else 'off' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span></td>
-            <td>{{ "AI-rated" if s.scoring_mode == "rated" else "Plain" }}</td>
-            <td><a href="/searches/{{ s.id }}/listings?bucket=found">{{ c.get('found', 0) }}</a></td>
-            {% if s.scoring_mode == "rated" %}
-            <td><a href="/searches/{{ s.id }}/listings?bucket=summary">{{ c.get('summary', 0) }}</a></td>
-            <td><a href="/searches/{{ s.id }}/listings?bucket=threshold">{{ c.get('threshold', 0) }}</a></td>
-            {% else %}
-            <td class="muted">-</td>
-            <td class="muted">-</td>
-            {% endif %}
-            <td>
-                <form class="inline" method="post" action="/searches/{{ s.id }}/toggle">
-                    <button class="secondary" type="submit">{{ 'Disable' if s.enabled else 'Enable' }}</button>
-                </form>
-                <form class="inline" method="post" action="/searches/{{ s.id }}/delete" onsubmit="return confirm('Delete {{ s.name }}?');">
-                    <button class="danger" type="submit">Delete</button>
-                </form>
-            </td>
-        </tr>
-    {% else %}
-        <tr><td colspan="9" class="muted">No searches yet.</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
+<div class="flex items-center justify-between mb-6">
+    <h1 class="text-xl font-semibold">Searches</h1>
+    <a href="/searches/new" class="inline-flex items-center px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">+ New search</a>
+</div>
+
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-xs uppercase tracking-wide text-gray-400">This month's Claude cost</div>
+        <div class="text-2xl font-semibold mt-1">${{ "%.2f"|format(overview.monthly_cost_usd) }}</div>
+    </div>
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-xs uppercase tracking-wide text-gray-400">Total scanned</div>
+        <div class="text-2xl font-semibold mt-1">{{ overview.total_scanned }}</div>
+    </div>
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-xs uppercase tracking-wide text-gray-400">Total found</div>
+        <div class="text-2xl font-semibold mt-1">{{ overview.total_found }}</div>
+    </div>
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+        <div class="text-xs uppercase tracking-wide text-gray-400">Total "Maybe"</div>
+        <div class="text-2xl font-semibold mt-1">{{ overview.total_daily_roundup }}</div>
+    </div>
+</div>
+
+{% if top_listings %}
+<div class="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-6">
+    <div class="text-xs uppercase tracking-wide text-gray-400 mb-2">Top ads</div>
+    <ul class="divide-y divide-gray-700">
+        {% for l in top_listings %}
+        <li class="py-2 flex items-center justify-between gap-3 text-sm">
+            <a href="{{ l.url }}" target="_blank" rel="noopener" class="text-indigo-300 hover:text-indigo-200 truncate">{{ l.title }}</a>
+            <span class="text-gray-400 whitespace-nowrap">{{ l.score }}/10 &middot; {{ l.price if l.price is not none else "-" }} &middot; {{ l.search_name }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="overflow-x-auto bg-gray-800 border border-gray-700 rounded-lg">
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
+                <th class="px-3 py-2">Name</th><th class="px-3 py-2">Scope</th><th class="px-3 py-2">Location</th>
+                <th class="px-3 py-2">Status</th><th class="px-3 py-2">Mode</th>
+                <th class="px-3 py-2">Found</th><th class="px-3 py-2">Maybe</th><th class="px-3 py-2">Yes!</th>
+                <th class="px-3 py-2"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+        {% for s in searches %}
+            {% set c = counts.get(s.id, {}) %}
+            <tr>
+                <td class="px-3 py-2"><a href="/searches/{{ s.id }}/edit" class="text-indigo-300 hover:text-indigo-200">{{ s.name }}</a></td>
+                <td class="px-3 py-2">{{ s.scope }}{% if s.require_shipping %} <span class="text-gray-400">(shipping required)</span>{% endif %}</td>
+                <td class="px-3 py-2">{{ s.location or "-" }}</td>
+                <td class="px-3 py-2">
+                    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {{ 'bg-green-900 text-green-300' if s.enabled else 'bg-gray-700 text-gray-400' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span>
+                </td>
+                <td class="px-3 py-2">{{ "AI-rated" if s.scoring_mode == "rated" else "Plain" }}</td>
+                <td class="px-3 py-2"><a href="/searches/{{ s.id }}/listings?bucket=found" class="text-indigo-300 hover:text-indigo-200">{{ c.get('found', 0) }}</a></td>
+                {% if s.scoring_mode == "rated" %}
+                <td class="px-3 py-2"><a href="/searches/{{ s.id }}/listings?bucket=daily_roundup" class="text-indigo-300 hover:text-indigo-200">{{ c.get('daily_roundup', 0) }}</a></td>
+                <td class="px-3 py-2"><a href="/searches/{{ s.id }}/listings?bucket=instant_alert" class="text-indigo-300 hover:text-indigo-200">{{ c.get('instant_alert', 0) }}</a></td>
+                {% else %}
+                <td class="px-3 py-2 text-gray-500">-</td>
+                <td class="px-3 py-2 text-gray-500">-</td>
+                {% endif %}
+                <td class="px-3 py-2 whitespace-nowrap">
+                    <form class="inline" method="post" action="/searches/{{ s.id }}/toggle">
+                        <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">{{ 'Disable' if s.enabled else 'Enable' }}</button>
+                    </form>
+                    <form class="inline" method="post" action="/searches/{{ s.id }}/delete" onsubmit="return confirm('Delete {{ s.name }}?');">
+                        <button class="px-2 py-1 rounded-md bg-red-900 hover:bg-red-800 text-red-200 text-xs" type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="9" class="px-3 py-6 text-center text-gray-400">No searches yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

@@ -1,25 +1,31 @@
 {% extends "base.html" %}
-{% block title %}{{ search.name }} - listings{% endblock %}
+{% block title %}{{ search.name }} - Fetch{% endblock %}
 {% block content %}
-<h1>{{ search.name }} <span class="muted">({{ bucket }})</span></h1>
-<p class="actions"><a class="button secondary" href="/searches">&larr; Back to searches</a></p>
-<table>
-    <thead>
-        <tr><th>Title</th><th>Price</th>{% if search.scoring_mode == "rated" %}<th>Score</th>{% endif %}<th>Source</th><th>Active for</th><th></th></tr>
-    </thead>
-    <tbody>
-    {% for l in listings %}
-        <tr>
-            <td><a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.title }}</a></td>
-            <td>{{ l.price if l.price is not none else "-" }}</td>
-            {% if search.scoring_mode == "rated" %}<td>{{ l.score if l.score is not none else "-" }}</td>{% endif %}
-            <td>{{ l.source }}</td>
-            <td>{{ l.age_days ~ " days" if l.age_days is not none else "-" }}</td>
-            <td>{% if l.stale_notified_at %}<span class="pill off">possible offer</span>{% endif %}</td>
-        </tr>
-    {% else %}
-        <tr><td colspan="6" class="muted">No listings in this bucket.</td></tr>
-    {% endfor %}
-    </tbody>
-</table>
+<h1 class="text-xl font-semibold mb-1">{{ search.name }} <span class="text-gray-400 font-normal text-base">({{ bucket_label }})</span></h1>
+<p class="mb-4"><a href="/searches" class="text-sm text-indigo-300 hover:text-indigo-200">&larr; Back to searches</a></p>
+<div class="overflow-x-auto bg-gray-800 border border-gray-700 rounded-lg">
+    <table class="w-full text-sm">
+        <thead>
+            <tr class="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
+                <th class="px-3 py-2">Title</th><th class="px-3 py-2">Price</th>
+                {% if search.scoring_mode == "rated" %}<th class="px-3 py-2">Score</th>{% endif %}
+                <th class="px-3 py-2">Source</th><th class="px-3 py-2">Active for</th><th class="px-3 py-2"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+        {% for l in listings %}
+            <tr>
+                <td class="px-3 py-2"><a href="{{ l.url }}" target="_blank" rel="noopener" class="text-indigo-300 hover:text-indigo-200">{{ l.title }}</a></td>
+                <td class="px-3 py-2">{{ l.price if l.price is not none else "-" }}</td>
+                {% if search.scoring_mode == "rated" %}<td class="px-3 py-2">{{ l.score if l.score is not none else "-" }}</td>{% endif %}
+                <td class="px-3 py-2">{{ l.source }}</td>
+                <td class="px-3 py-2">{{ l.age_days ~ " days" if l.age_days is not none else "-" }}</td>
+                <td class="px-3 py-2">{% if l.stale_notified_at %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-300">possible offer</span>{% endif %}</td>
+            </tr>
+        {% else %}
+            <tr><td colspan="6" class="px-3 py-6 text-center text-gray-400">No listings in this bucket.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

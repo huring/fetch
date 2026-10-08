@@ -144,7 +144,7 @@ def test_bucket_counts(conn, search_id):
     storage.mark_prefiltered_out(conn, excluded, "too expensive")
 
     counts = storage.get_search_bucket_counts(conn, score_digest_min=5, score_instant_threshold=8)
-    assert counts[search_id] == {"found": 3, "summary": 1, "threshold": 1}
+    assert counts[search_id] == {"found": 3, "daily_roundup": 1, "instant_alert": 1}
 
 
 def test_list_bucket_listings_filters_by_bucket(conn, search_id):
@@ -154,7 +154,7 @@ def test_list_bucket_listings_filters_by_bucket(conn, search_id):
     storage.mark_scored(conn, high, 9, "r", [], "p")
 
     found = storage.list_bucket_listings(conn, search_id, "found", score_digest_min=5, score_instant_threshold=8)
-    threshold = storage.list_bucket_listings(conn, search_id, "threshold", score_digest_min=5, score_instant_threshold=8)
+    threshold = storage.list_bucket_listings(conn, search_id, "instant_alert", score_digest_min=5, score_instant_threshold=8)
 
     assert {row["id"] for row in found} == {low, high}
     assert {row["id"] for row in threshold} == {high}
@@ -260,6 +260,60 @@ def test_scoring_batch_bookkeeping(conn, search_id):
 
     assert storage.get_in_progress_batch_ids(conn) == []
     assert storage.count_listings_awaiting_scoring(conn) == 2  # back on the unbatched list
+
+
+def test_get_overview_stats(conn, search_id):
+    a = storage.upsert_listing(conn, search_id, make_listing(external_id="a"))
+    b = storage.upsert_listing(conn, search_id, make_listing(external_id="b"))
+    c = storage.upsert_listing(conn, search_id, make_listing(external_id="c"))
+    storage.mark_scored(conn, a, 3, "r", [], "p")  # found-only
+    storage.mark_scored(conn, b, 6, "r", [], "p")  # daily_roundup
+    storage.mark_prefiltered_out(conn, c, "too expensive")  # excluded entirely
+
+    run_id = storage.start_run(conn)
+    storage.log_token_usage(conn, run_id, "claude-haiku-4-5", 1000, 200, 0.0021)
+
+    stats = storage.get_overview_stats(conn, score_digest_min=5, score_instant_threshold=8)
+
+    assert stats["total_scanned"] == 3
+    assert stats["total_found"] == 2  # a and b, not the prefiltered-out c
+    assert stats["total_daily_roundup"] == 1  # just b
+    assert round(stats["monthly_cost_usd"], 4) == 0.0021
+
+
+def test_get_top_listings_only_includes_rated_scores(conn, search_id):
+    low = storage.upsert_listing(conn, search_id, make_listing(external_id="low"))
+    high = storage.upsert_listing(conn, search_id, make_listing(external_id="high"))
+    plain = storage.upsert_listing(conn, search_id, make_listing(external_id="plain"))
+    storage.mark_scored(conn, low, 4, "r", [], "p")
+    storage.mark_scored(conn, high, 9, "r", [], "p")
+    storage.mark_surfaced_plain(conn, plain)  # score -1, never "top"
+
+    top = storage.get_top_listings(conn, limit=5)
+
+    assert [row["id"] for row in top] == [high, low]
+
+
+def test_list_feed_listings_filters_by_bucket_and_search(conn, search_id):
+    search_b = searches.create_search(conn, Search(name="Other search"))
+    roundup_a = storage.upsert_listing(conn, search_id, make_listing(external_id="roundup-a"))
+    roundup_b = storage.upsert_listing(conn, search_b.id, make_listing(external_id="roundup-b"))
+    alert_a = storage.upsert_listing(conn, search_id, make_listing(external_id="alert-a"))
+    storage.mark_scored(conn, roundup_a, 6, "r", [], "p")
+    storage.mark_scored(conn, roundup_b, 6, "r", [], "p")
+    storage.mark_scored(conn, alert_a, 9, "r", [], "p")
+
+    all_roundup = storage.list_feed_listings(conn, "daily_roundup", score_digest_min=5, score_instant_threshold=8)
+    assert {row["id"] for row in all_roundup} == {roundup_a, roundup_b}
+
+    only_search = storage.list_feed_listings(
+        conn, "daily_roundup", score_digest_min=5, score_instant_threshold=8, search_id=search_id
+    )
+    assert {row["id"] for row in only_search} == {roundup_a}
+    assert only_search[0]["search_name"] == "Test search"
+
+    only_alerts = storage.list_feed_listings(conn, "instant_alert", score_digest_min=5, score_instant_threshold=8)
+    assert {row["id"] for row in only_alerts} == {alert_a}
 
 
 def test_get_listing_with_search_name(conn, search_id):

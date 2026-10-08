@@ -77,7 +77,7 @@ def test_searches_list_shows_bucket_counts(client):
 
     response = client.get("/searches")
     assert response.status_code == 200
-    assert f'/searches/{search.id}/listings?bucket=threshold' in response.text
+    assert f'/searches/{search.id}/listings?bucket=instant_alert' in response.text
 
 
 def test_search_listings_shows_matching_bucket(client):
@@ -96,11 +96,11 @@ def test_search_listings_shows_matching_bucket(client):
     )
     storage.mark_scored(conn, listing_id, 9, "great", [], "good")
 
-    response = client.get(f"/searches/{search.id}/listings?bucket=threshold")
+    response = client.get(f"/searches/{search.id}/listings?bucket=instant_alert")
     assert response.status_code == 200
     assert "High score item" in response.text
 
-    response_wrong_bucket = client.get(f"/searches/{search.id}/listings?bucket=summary")
+    response_wrong_bucket = client.get(f"/searches/{search.id}/listings?bucket=daily_roundup")
     assert "High score item" not in response_wrong_bucket.text
 
 
@@ -118,6 +118,70 @@ def test_search_listings_unknown_search_redirects(client):
     response = client.get("/searches/999999/listings", follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"] == "/searches"
+
+
+def test_searches_list_shows_overview_panel(client):
+    from watcher import searches, storage
+    from watcher.models import Listing
+
+    conn = client.app.state.conn
+    search = searches.get_search(conn, searches.list_searches(conn)[0].id)
+    listing_id = storage.upsert_listing(
+        conn, search.id,
+        Listing(
+            source="blocket", external_id="ov1", title="Overview test item", description="",
+            price=100, url="https://example.com/ov1", location=None, ships=True,
+            published_at=None, raw={},
+        ),
+    )
+    storage.mark_scored(conn, listing_id, 9, "great", [], "good")
+
+    response = client.get("/searches")
+
+    assert response.status_code == 200
+    assert "This month's Claude cost" in response.text
+    assert "Total scanned" in response.text
+    assert "Overview test item" in response.text  # shows up in "Top ads"
+
+
+def test_feed_shows_daily_roundup_by_default(client):
+    from watcher import searches, storage
+    from watcher.models import Listing
+
+    conn = client.app.state.conn
+    search = searches.get_search(conn, searches.list_searches(conn)[0].id)
+    roundup_id = storage.upsert_listing(
+        conn, search.id,
+        Listing(
+            source="blocket", external_id="f1", title="Roundup item", description="",
+            price=100, url="https://example.com/f1", location=None, ships=True,
+            published_at=None, raw={},
+        ),
+    )
+    alert_id = storage.upsert_listing(
+        conn, search.id,
+        Listing(
+            source="blocket", external_id="f2", title="Alert item", description="",
+            price=100, url="https://example.com/f2", location=None, ships=True,
+            published_at=None, raw={},
+        ),
+    )
+    storage.mark_scored(conn, roundup_id, 6, "r", [], "p")
+    storage.mark_scored(conn, alert_id, 9, "r", [], "p")
+
+    response = client.get("/feed")
+    assert response.status_code == 200
+    assert "Roundup item" in response.text
+    assert "Alert item" not in response.text
+
+    alert_response = client.get("/feed?bucket=instant_alert")
+    assert "Alert item" in alert_response.text
+    assert "Roundup item" not in alert_response.text
+
+    from watcher.models import Search
+    other_search = searches.create_search(conn, Search(name="Other search"))
+    filtered_response = client.get(f"/feed?search_id={other_search.id}")
+    assert "Roundup item" not in filtered_response.text
 
 
 def test_create_search_via_form(client):

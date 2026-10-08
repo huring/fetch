@@ -1,57 +1,67 @@
 {% extends "base.html" %}
-{% block title %}Health{% endblock %}
+{% block title %}Health - Fetch{% endblock %}
 {% block content %}
-<h1>Health</h1>
-<fieldset>
-    <legend>Last run</legend>
+<h1 class="text-xl font-semibold mb-4">Health</h1>
+
+<fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800 mb-4">
+    <legend class="text-sm font-semibold text-gray-200 px-1">Last run</legend>
     {% if last_run %}
-    <p>
+    <p class="text-sm mt-2 leading-relaxed">
         Started: {{ last_run.started_at }}<br>
         Finished: {{ last_run.finished_at }}<br>
-        Status: <span class="pill {{ 'on' if last_run.status == 'ok' else 'off' }}">{{ last_run.status }}</span><br>
+        Status: <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {{ 'bg-green-900 text-green-300' if last_run.status == 'ok' else 'bg-gray-700 text-gray-400' }}">{{ last_run.status }}</span><br>
         Searches processed: {{ last_run.searches_processed }}<br>
         Listings fetched: {{ last_run.listings_fetched }}
-        {% if last_run.error_message %}<br><span class="muted">Error: {{ last_run.error_message }}</span>{% endif %}
+        {% if last_run.error_message %}<br><span class="text-gray-400">Error: {{ last_run.error_message }}</span>{% endif %}
     </p>
     {% else %}
-    <p class="muted">No runs yet.</p>
+    <p class="text-sm text-gray-400 mt-2">No runs yet.</p>
     {% endif %}
 </fieldset>
-<fieldset>
-    <legend>Scoring</legend>
-    <p class="muted">
+
+<fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800 mb-4">
+    <legend class="text-sm font-semibold text-gray-200 px-1">Scoring</legend>
+    <p class="text-sm text-gray-400 mt-2">
         Scoring runs asynchronously via the Claude Batch API, independent of
         any single fetch run above - see README "Keeping Claude spend low".
     </p>
-    <p>
+    <p class="text-sm mt-2">
         Awaiting submission: {{ awaiting_scoring }}<br>
         Submitted, awaiting results: {{ in_progress_scoring }}
     </p>
 </fieldset>
-<fieldset>
-    <legend>Monthly Claude API cost</legend>
-    <table>
-        <thead><tr><th>Month</th><th>Input tokens</th><th>Output tokens</th><th>Cost (USD)</th></tr></thead>
-        <tbody>
-        {% for row in monthly_cost %}
-            <tr><td>{{ row.month }}</td><td>{{ row.input_tokens }}</td><td>{{ row.output_tokens }}</td><td>${{ "%.4f"|format(row.cost_usd) }}</td></tr>
-        {% else %}
-            <tr><td colspan="4" class="muted">No usage logged yet.</td></tr>
-        {% endfor %}
-        </tbody>
-    </table>
+
+<fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800 mb-4">
+    <legend class="text-sm font-semibold text-gray-200 px-1">Monthly Claude API cost</legend>
+    <div class="overflow-x-auto mt-2">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
+                    <th class="px-3 py-2">Month</th><th class="px-3 py-2">Input tokens</th><th class="px-3 py-2">Output tokens</th><th class="px-3 py-2">Cost (USD)</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800">
+            {% for row in monthly_cost %}
+                <tr><td class="px-3 py-2">{{ row.month }}</td><td class="px-3 py-2">{{ row.input_tokens }}</td><td class="px-3 py-2">{{ row.output_tokens }}</td><td class="px-3 py-2">${{ "%.4f"|format(row.cost_usd) }}</td></tr>
+            {% else %}
+                <tr><td colspan="4" class="px-3 py-6 text-center text-gray-400">No usage logged yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </fieldset>
-<fieldset>
-    <legend>Danger zone</legend>
-    <p class="muted">
+
+<fieldset class="border border-red-900 rounded-lg p-4 bg-gray-800">
+    <legend class="text-sm font-semibold text-red-300 px-1">Danger zone</legend>
+    <p class="text-sm text-gray-400 mt-2">
         Deletes every fetched/scored listing, run and cost-log entry, and
         resets each watched item's current/lowest-seen price and last-checked
         time - a clean slate for re-testing. Search, marketplace and watched
         item definitions themselves (poll interval, auth, target prices, ...)
         are not affected.
     </p>
-    <form method="post" action="/health/clear" onsubmit="return confirm('Delete all listings, run history and cost logs, and reset watched-item price state? Definitions are kept.');">
-        <button class="danger" type="submit">Clear listings &amp; run history</button>
+    <form method="post" action="/health/clear" onsubmit="return confirm('Delete all listings, run history and cost logs, and reset watched-item price state? Definitions are kept.');" class="mt-3">
+        <button class="px-4 py-2 rounded-md bg-red-900 hover:bg-red-800 text-red-200 text-sm font-medium" type="submit">Clear listings &amp; run history</button>
     </form>
 </fieldset>
 {% endblock %}
