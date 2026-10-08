@@ -67,3 +67,6 @@ One page showing every search's "summary"-bucket ads together instead of having 
 The current bucket names (`found`/`summary`/`threshold`) aren't clear to me at a glance. Decided naming (2026-10-08):
 - **Code/internal references**: "daily roundup" (was summary) / "instant alert" (was threshold) - names them by when you're notified, matching `SCORE_DIGEST_MIN`/`SCORE_INSTANT_THRESHOLD` directly so it won't go stale.
 - **UI display labels**: "Maybe" (was summary) / "Yes!" (was threshold) - terser and more personality for the admin UI specifically.
+
+## 19. New marketplace: Auctionet
+https://auctionet.com/sv/search 
