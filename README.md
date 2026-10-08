@@ -1,6 +1,6 @@
-# Secondhand marketplace watcher
+# Fetch
 
-Watches secondhand marketplaces for listings matching configurable "searches"
+A secondhand marketplace watcher: watches for listings matching configurable "searches"
 (hifi gear, a pickup truck, bookshelves - anything), scores candidates
 against your criteria with Claude, and notifies you on Slack: instantly for
 standout finds, once a day for everything else. Blocket, Vinted, Rehifi and
@@ -319,7 +319,10 @@ limitation, not configuration) and has no stack webhooks in the free tier
 (Business Edition only). So:
 
 1. `.github/workflows/build.yml` builds the image on every push to `main` and
-   pushes it to `ghcr.io/<you>/hifi-agent:latest`.
+   pushes it to `ghcr.io/<you>/fetch:latest` - the image name tracks the
+   GitHub repo name automatically (the workflow tags it
+   `ghcr.io/${{ github.repository }}:latest`), so renaming the repo alone is
+   enough to change this, no workflow edit needed.
 2. In Portainer, create a **Git-based stack** pointing at this repo's
    `docker-compose.yml`, with **Polling** auto-update enabled at whatever
    interval you're comfortable with (e.g. every few minutes). Portainer pulls
@@ -330,7 +333,7 @@ limitation, not configuration) and has no stack webhooks in the free tier
    documents every variable; `.env` itself is gitignored. (Marketplace-level
    secrets, if a marketplace ever needs one, are set separately in the admin
    UI at `/marketplaces` - see above - not here.)
-4. If `ghcr.io/<you>/hifi-agent` is a private package, add it as a Custom
+4. If `ghcr.io/<you>/fetch` is a private package, add it as a Custom
    Registry in Portainer (Registries -> Add registry) with a GitHub PAT that
    has `read:packages`, so the stack can pull it. Making the package public
    avoids this step entirely and is reasonable here since the image contains

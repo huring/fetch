@@ -27,8 +27,31 @@ The explicitly-deferred half of the watched-items "find used" feature - a genera
 ## 14. Admin UI access control
 There's currently zero auth on the admin UI. Low risk while it's only reachable inside the network via Portainer, but worth a basic password gate before it's ever exposed more broadly.
 
-## 15. Rename the project to "Fetch" - high
-Decided on "Fetch" as the official name (nginx proxy is now at fetch.home). Rename everywhere: the GitHub repo itself (currently `hifi-agent`), the README title/intro, any code comments or strings that say "hifi-agent" or reference the old name, the Docker/GHCR image name, and the Portainer stack name. GitHub repo renames keep the old URL as a redirect, but the GHCR image name and Portainer stack config need to be updated by hand to match - plan for a brief redeploy, not just a code change.
+## 15. Rename the project to "Fetch" - remaining manual steps
+Code-side rename is done (2026-10-09 - see CHANGELOG): README title/intro,
+`docker-compose.yml`'s image line, and the admin app's internal title all say
+"Fetch" now. What's left is outside what Claude can do from this environment
+(no `gh`/GitHub API access here) - on you:
+
+1. Rename the GitHub repo itself: Settings -> General -> Repository name,
+   `hifi-agent` -> `fetch`. GitHub keeps the old URL working as a redirect.
+2. Update your local clone's remote so it points at the new URL directly
+   rather than relying on the redirect: `git remote set-url origin
+   https://github.com/huring/fetch.git`.
+3. Push (or re-run the Actions workflow) once renamed - it'll build and push
+   to `ghcr.io/huring/fetch:latest` automatically (the tag is derived from
+   `github.repository`, no workflow edit needed). The old
+   `ghcr.io/huring/hifi-agent` package is **not** renamed or redirected - it's
+   a separate, now-orphaned package that keeps existing until you delete it
+   by hand (GitHub -> your profile -> Packages).
+4. The new `fetch` package likely starts **private** by default regardless of
+   what visibility the old one had - if you want to skip configuring a
+   registry PAT in Portainer (see README step 4), set it to public: the new
+   package's own page -> Settings -> Danger Zone -> Change visibility.
+5. In Portainer, update the stack's Git repository URL to the new `fetch`
+   URL (works via the redirect either way, but cleaner not to depend on it
+   long-term), and rename the stack itself if you want its display name to
+   match - plan for a brief redeploy once the new image is pullable.
 
 ## 20. New marketplace: Luleå Auktionsverk
 https://www.luleaauktionsverk.se/

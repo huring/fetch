@@ -5,7 +5,7 @@
 #
 services:
   watcher:
-    image: ghcr.io/huring/hifi-agent:latest
+    image: ghcr.io/huring/fetch:latest
     restart: unless-stopped
     ports:
       - "8000:8000"

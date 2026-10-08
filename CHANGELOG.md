@@ -4,6 +4,15 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-08
+- **Code-side rename to "Fetch"** (partial progress on backlog #15) - README
+  title/intro, the two example GHCR paths in the Portainer deploy section,
+  `docker-compose.yml`'s image line, and the admin app's internal FastAPI
+  title now all say "Fetch" instead of "hifi-agent"/"Watcher admin" (the
+  admin UI's own pages already did, from earlier work). The actual GitHub
+  repo rename, GHCR package visibility, and the Portainer stack's own config
+  are manual steps outside what's possible from this environment (no GitHub
+  API access here) - left in backlog #15 with the exact remaining steps,
+  rather than closed out, since the story isn't fully done yet.
 - **Enriched watched items + likely fix for "current price" staying empty**
   (was backlog #23) - the edit page now shows a small "is this the right
   item?" card (a short description and the product's own image, linked to

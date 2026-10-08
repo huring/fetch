@@ -217,6 +217,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         conn.close()
         scheduler_conn.close()
 
-    app = FastAPI(title="Watcher admin", lifespan=lifespan)
+    app = FastAPI(title="Fetch admin", lifespan=lifespan)
     app.include_router(router)
     return app
