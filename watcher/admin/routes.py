@@ -13,9 +13,10 @@ from fastapi.templating import Jinja2Templates
 from watcher import marketplace_configs as marketplace_configs_repo
 from watcher import searches as searches_repo
 from watcher import storage
+from watcher import watched_items as watched_items_repo
 from watcher.marketplaces import MARKETPLACES
 from watcher.marketplaces import get as get_marketplace
-from watcher.models import Search, WatchedModel
+from watcher.models import Search, WatchedItem, WatchedModel
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -199,6 +200,108 @@ def delete_search(request: Request, search_id: int):
     conn = request.app.state.conn
     searches_repo.delete_search(conn, search_id)
     return RedirectResponse("/searches", status_code=303)
+
+
+def _watched_item_to_form(item: Optional[WatchedItem]) -> dict:
+    if item is None:
+        return dict(name="", url="", enabled=True, target_price="", check_frequency="daily", find_used=False)
+    return dict(
+        name=item.name,
+        url=item.url,
+        enabled=item.enabled,
+        target_price=item.target_price if item.target_price is not None else "",
+        check_frequency=item.check_frequency,
+        find_used=item.find_used,
+    )
+
+
+def _form_to_watched_item(form_data) -> WatchedItem:
+    target_price = form_data.get("target_price", "")
+    check_frequency = form_data.get("check_frequency", "daily")
+    if check_frequency not in ("daily", "weekly", "monthly"):
+        check_frequency = "daily"
+    return WatchedItem(
+        name=form_data.get("name", ""),
+        url=form_data.get("url", ""),
+        enabled=form_data.get("enabled") is not None,
+        target_price=int(target_price) if target_price.strip() else None,
+        check_frequency=check_frequency,
+        find_used=form_data.get("find_used") is not None,
+    )
+
+
+@router.get("/watched-items", response_class=HTMLResponse)
+def list_watched_items(request: Request, checked: Optional[int] = None):
+    conn = request.app.state.conn
+    items = watched_items_repo.list_watched_items(conn)
+    return templates.TemplateResponse(request, "watched_items_list.html", {"items": items, "checked": checked})
+
+
+@router.get("/watched-items/new", response_class=HTMLResponse)
+def new_watched_item_form(request: Request):
+    return templates.TemplateResponse(
+        request, "watched_item_form.html",
+        {"form": _watched_item_to_form(None), "is_edit": False, "action_url": "/watched-items/new"},
+    )
+
+
+@router.post("/watched-items/new")
+async def create_watched_item(request: Request):
+    conn = request.app.state.conn
+    form_data = await request.form()
+    item = _form_to_watched_item(form_data)
+    watched_items_repo.create_watched_item(conn, item)
+    return RedirectResponse("/watched-items", status_code=303)
+
+
+@router.get("/watched-items/{item_id}/edit", response_class=HTMLResponse)
+def edit_watched_item_form(request: Request, item_id: int):
+    conn = request.app.state.conn
+    item = watched_items_repo.get_watched_item(conn, item_id)
+    return templates.TemplateResponse(
+        request, "watched_item_form.html",
+        {"form": _watched_item_to_form(item), "is_edit": True, "action_url": f"/watched-items/{item_id}/edit"},
+    )
+
+
+@router.post("/watched-items/{item_id}/edit")
+async def update_watched_item(request: Request, item_id: int):
+    conn = request.app.state.conn
+    form_data = await request.form()
+    item = _form_to_watched_item(form_data)
+    existing = watched_items_repo.get_watched_item(conn, item_id)
+    watched_items_repo.update_watched_item(conn, item_id, item)
+    # find_used turned off: stop the linked search from polling (kept, not
+    # deleted, so its history and a re-enable both still work); turned back
+    # on: re-enable rather than leaving create_watched_item's lazy
+    # (title-not-known-yet) path to spin up a duplicate.
+    if existing is not None and existing.linked_search_id is not None and existing.find_used != item.find_used:
+        searches_repo.set_enabled(conn, existing.linked_search_id, item.find_used)
+    return RedirectResponse("/watched-items", status_code=303)
+
+
+@router.post("/watched-items/{item_id}/toggle")
+def toggle_watched_item(request: Request, item_id: int):
+    conn = request.app.state.conn
+    item = watched_items_repo.get_watched_item(conn, item_id)
+    if item is not None:
+        watched_items_repo.set_enabled(conn, item_id, not item.enabled)
+    return RedirectResponse("/watched-items", status_code=303)
+
+
+@router.post("/watched-items/{item_id}/delete")
+def delete_watched_item(request: Request, item_id: int):
+    conn = request.app.state.conn
+    watched_items_repo.delete_watched_item(conn, item_id)
+    return RedirectResponse("/watched-items", status_code=303)
+
+
+@router.post("/watched-items/{item_id}/check")
+def check_watched_item_now(request: Request, item_id: int):
+    if watched_items_repo.get_watched_item(request.app.state.conn, item_id) is None:
+        return RedirectResponse("/watched-items", status_code=303)
+    request.app.state.trigger_watched_item_check(item_id)
+    return RedirectResponse("/watched-items?checked=" + str(item_id), status_code=303)
 
 
 @router.get("/marketplaces", response_class=HTMLResponse)

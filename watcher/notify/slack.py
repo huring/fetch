@@ -132,6 +132,29 @@ def send_stale_opportunity(
     _post(webhook_url, text)
 
 
+def format_price_watch_instant(
+    item_name: str, title: str, price: int, url: str, target_price: Optional[int]
+) -> str:
+    target_note = f" (target: {target_price} SEK)" if target_price is not None else ""
+    return f":moneybag: *Price watch* - {item_name}\n*<{url}|{title}>* is now {price} SEK{target_note}"
+
+
+def send_price_watch_instant(
+    webhook_url: str,
+    item_name: str,
+    title: str,
+    price: int,
+    url: str,
+    target_price: Optional[int],
+    dry_run: bool = False,
+) -> None:
+    text = format_price_watch_instant(item_name, title, price, url, target_price)
+    if dry_run:
+        logger.info("[dry-run] would send price-watch Slack alert:\n%s", text)
+        return
+    _post(webhook_url, text)
+
+
 def send_health_alert(
     webhook_url: str, source: str, consecutive_failures: int, last_error: str, dry_run: bool = False
 ) -> None:

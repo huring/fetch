@@ -398,6 +398,13 @@ def clear_operational_data(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM token_usage")
     conn.execute("DELETE FROM source_health")
     conn.execute("DELETE FROM price_history")
+    conn.execute(
+        """
+        UPDATE watched_items SET
+            current_price = NULL, lowest_price_seen = NULL,
+            last_alert_price = NULL, last_checked_at = NULL
+        """
+    )
     conn.commit()
 
 

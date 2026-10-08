@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 Scope = Literal["local", "national"]
 ScoringMode = Literal["plain", "rated"]
+CheckFrequency = Literal["daily", "weekly", "monthly"]
 
 
 class WatchedModel(BaseModel):
@@ -57,6 +58,35 @@ class Search(BaseModel):
     # Registry keys (see marketplaces.py) of the marketplaces this search
     # runs on, e.g. ["blocket"].
     marketplaces: List[str] = Field(default_factory=list)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class WatchedItem(BaseModel):
+    """A single arbitrary product URL (any retailer - Amazon, a brand's own
+    store, anything) tracked for a price drop, independent of the
+    search/marketplace machinery - there's no search phrase or marketplace
+    fetch involved, just one URL re-checked on its own schedule."""
+
+    id: Optional[int] = None
+    name: str
+    url: str
+    enabled: bool = True
+    target_price: Optional[int] = None
+    check_frequency: CheckFrequency = "daily"
+    # Also look for a used version of this exact item on the existing
+    # marketplaces (Blocket/Vinted/Rehifi), alerting if one turns up at or
+    # below target_price - see watched_items.py/price_watch.py for how the
+    # linked plain search this spins up is created and kept in sync.
+    find_used: bool = False
+    linked_search_id: Optional[int] = None
+    # Everything below is check-run state, not admin-edited - see
+    # watched_items.record_check_result/record_alert.
+    extracted_title: Optional[str] = None
+    current_price: Optional[int] = None
+    lowest_price_seen: Optional[int] = None
+    last_alert_price: Optional[int] = None
+    last_checked_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

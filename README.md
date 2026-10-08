@@ -55,6 +55,10 @@ back as a proper marketplace if/when it's needed.
    `SCORE_DIGEST_MIN`) gets a one-time "might be worth a lower offer" Slack
    notice.
 
+Separately from all of the above, **watched items** track one exact product
+URL (any site) for a price drop on their own daily/weekly/monthly schedule -
+see "Watched items" below.
+
 ## Keeping Claude spend low
 
 A few things work together to keep this cheap enough to run indefinitely
@@ -187,6 +191,46 @@ action for wiping accumulated data back to a clean slate (searches and
 marketplace settings aren't touched) - handy after a change to what gets
 fetched or how it's scored, to confirm the new behavior from scratch rather
 than mixed in with old results.
+
+## Watched items
+
+A **watched item** (`http://<host>:8000/watched-items`) is a different thing
+from a search: instead of a phrase matched against a marketplace, it's one
+exact product URL - any retailer, not just a registered marketplace - checked
+on its own schedule for a price drop. There's no per-site parser: the fetched
+page's text is handed to Claude with a structured-output schema to read off
+the current price, title and stock status, so it keeps working as a site's
+markup changes instead of a regex scraper quietly breaking. This is one plain
+(non-batch) Claude call per check, not the Batch API listing scoring uses -
+at the volume this is meant for (a handful of items, checked at most daily)
+the Batch API's 50% discount isn't worth its submit/collect bookkeeping.
+
+Fields: a name, the URL, an optional **target price** (alert on Slack the
+moment the price is at or below it - once alerted, it won't repeat daily at
+the same or a higher price, only on a further drop), and a **check
+frequency** (daily/weekly/monthly - price drops aren't time-sensitive, so
+daily is just the default, not a requirement). A **Check now** button on the
+list page triggers an out-of-cycle check the same way a marketplace's **Run
+now** does.
+
+**Find this item used**, if checked, also searches the existing marketplaces
+(Blocket/Vinted/Rehifi) for a used copy once the product's title is known
+from the first check - it does this by automatically creating a normal
+"plain" search (see "Searches and the admin UI" above) with that title as its
+one search phrase and the watched item's own target price as its instant
+alert price, so a used (or new, elsewhere) copy at a good price alerts
+exactly like the watched item itself does. From then on this is handled
+entirely by the existing search/marketplace machinery - no separate code path
+to find a used copy. Searching non-marketplace websites for a better price
+is a possible future extension, not implemented yet.
+
+Amazon (or any site) scraping this way is best-effort: unlike
+Blocket/Vinted/Rehifi, there's no reverse-engineered stable structure to rely
+on, and some retailers (Amazon in particular) actively push back on
+automated traffic. At one check per item per day this is low-volume enough
+to likely hold up, but there's no guarantee, and no clean fix beyond a paid
+proxy or a specialized price-tracking API if a particular site starts
+blocking it.
 
 ## Deploying via Portainer
 

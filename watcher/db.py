@@ -127,6 +127,24 @@ CREATE TABLE IF NOT EXISTS scoring_batch_items (
     listing_id INTEGER NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
     UNIQUE(batch_id, custom_id, listing_index)
 );
+
+CREATE TABLE IF NOT EXISTS watched_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    target_price INTEGER,
+    check_frequency TEXT NOT NULL DEFAULT 'daily',
+    find_used INTEGER NOT NULL DEFAULT 0,
+    linked_search_id INTEGER REFERENCES searches(id) ON DELETE SET NULL,
+    extracted_title TEXT,
+    current_price INTEGER,
+    lowest_price_seen INTEGER,
+    last_alert_price INTEGER,
+    last_checked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 

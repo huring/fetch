@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit" if is_edit else "New" }} watched item{% endblock %}
+{% block content %}
+<h1>{{ "Edit" if is_edit else "New" }} watched item</h1>
+<form method="post" action="{{ action_url }}">
+    <fieldset>
+        <legend>Basics</legend>
+        <label>Name <span class="hint">(your own label, e.g. "VU meter")</span>
+            <input type="text" name="name" value="{{ form.name }}" required>
+        </label>
+        <label>Product URL
+            <input type="text" name="url" value="{{ form.url }}" required>
+        </label>
+        <label><input type="checkbox" name="enabled" {{ "checked" if form.enabled else "" }} style="width:auto;display:inline;"> Enabled</label>
+        <label>Target price (SEK) <span class="hint">(alert the moment the price is at or below this - leave blank to just track price history with no alert)</span>
+            <input type="number" name="target_price" value="{{ form.target_price }}">
+        </label>
+        <label>Check frequency <span class="hint">(price drops aren't time-sensitive - daily is the default, but weekly/monthly works just as well)</span>
+            <select name="check_frequency">
+                <option value="daily" {{ "selected" if form.check_frequency == "daily" else "" }}>Daily</option>
+                <option value="weekly" {{ "selected" if form.check_frequency == "weekly" else "" }}>Weekly</option>
+                <option value="monthly" {{ "selected" if form.check_frequency == "monthly" else "" }}>Monthly</option>
+            </select>
+        </label>
+        <label><input type="checkbox" name="find_used" {{ "checked" if form.find_used else "" }} style="width:auto;display:inline;"> Find this item used <span class="hint">(also search Blocket/Vinted/Rehifi for a used copy once the product's title is known from the first check, alerting at or below the same target price)</span></label>
+    </fieldset>
+
+    <div class="actions">
+        <button type="submit">Save</button>
+        <a class="button secondary" href="/watched-items">Cancel</a>
+    </div>
+</form>
+{% endblock %}

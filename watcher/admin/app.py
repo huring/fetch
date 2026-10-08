@@ -28,14 +28,21 @@ from watcher.admin.routes import router
 from watcher.liveness import run_liveness_sweep
 from watcher.marketplaces import MARKETPLACES
 from watcher.pipeline import collect_finished_batches, run_marketplace_cycle, send_digest, submit_pending_scoring
+from watcher.price_watch import check_item, run_price_watch_sweep
 from watcher.seed import seed_default_searches
 from watcher.settings import Settings, load_settings
+from watcher import watched_items as watched_items_repo
 
 logger = logging.getLogger(__name__)
 
 TICK_INTERVAL_MINUTES = 5
 LIVENESS_SWEEP_HOUR = 3
 LIVENESS_SWEEP_MINUTE = 30
+# An hour before the default digest_time - price-watch alerts are always
+# instant (there's no watched-item digest tier), so the exact hour only
+# matters in that it shouldn't collide with other scheduled jobs.
+PRICE_WATCH_HOUR = 7
+PRICE_WATCH_MINUTE = 0
 
 
 def _is_due(config, now: datetime.datetime) -> bool:
@@ -118,6 +125,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 except Exception:
                     logger.exception("Scheduled liveness sweep failed")
 
+        def _price_watch_job():
+            with scheduler_lock:
+                if client is None:
+                    logger.error("ANTHROPIC_API_KEY not configured, skipping price-watch sweep")
+                    return
+                try:
+                    result = run_price_watch_sweep(scheduler_conn, client, settings, dry_run=settings.dry_run)
+                    logger.info("Price-watch sweep complete: %s", result)
+                except Exception:
+                    logger.exception("Scheduled price-watch sweep failed")
+
         def _run_now(key: str):
             with scheduler_lock:
                 try:
@@ -138,6 +156,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 except Exception:
                     logger.exception("Scoring submit/collect failed after manual run of %s", key)
 
+        def _check_watched_item_now(item_id: int):
+            with scheduler_lock:
+                if client is None:
+                    logger.error("ANTHROPIC_API_KEY not configured, cannot check watched item %s", item_id)
+                    return
+                item = watched_items_repo.get_watched_item(scheduler_conn, item_id)
+                if item is None:
+                    return
+                try:
+                    result = check_item(scheduler_conn, client, settings, item, dry_run=settings.dry_run)
+                    logger.info("Manually-triggered watched-item check complete (%s): %s", item.name, result)
+                except Exception:
+                    logger.exception("Manually-triggered watched-item check failed for %s", item.name)
+
         def trigger_marketplace_run(key: str) -> None:
             # Runs on the scheduler's own thread, same as every other
             # scheduled job - never blocks the request that triggered it.
@@ -145,13 +177,18 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             # progress queues up and runs right after, rather than racing it.
             scheduler.add_job(_run_now, args=[key], next_run_time=datetime.datetime.now())
 
+        def trigger_watched_item_check(item_id: int) -> None:
+            scheduler.add_job(_check_watched_item_now, args=[item_id], next_run_time=datetime.datetime.now())
+
         scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
         hour, minute = settings.digest_time.split(":")
         scheduler.add_job(_digest_job, CronTrigger(hour=int(hour), minute=int(minute)))
         scheduler.add_job(_liveness_job, CronTrigger(hour=LIVENESS_SWEEP_HOUR, minute=LIVENESS_SWEEP_MINUTE))
+        scheduler.add_job(_price_watch_job, CronTrigger(hour=PRICE_WATCH_HOUR, minute=PRICE_WATCH_MINUTE))
         scheduler.start()
         app.state.scheduler = scheduler
         app.state.trigger_marketplace_run = trigger_marketplace_run
+        app.state.trigger_watched_item_check = trigger_watched_item_check
 
         yield
 

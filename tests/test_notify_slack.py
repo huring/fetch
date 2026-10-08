@@ -94,6 +94,25 @@ def test_send_health_alert():
 
 
 @responses.activate
+def test_send_price_watch_instant_posts_formatted_text():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    slack.send_price_watch_instant(WEBHOOK, "VU meter", "VU Meter Pro", 900, "https://x/5", 1000)
+
+    body = responses.calls[0].request.body.decode()
+    assert "VU meter" in body
+    assert "VU Meter Pro" in body
+    assert "900 SEK" in body
+    assert "target: 1000 SEK" in body
+
+
+def test_send_price_watch_instant_dry_run_does_not_post():
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        slack.send_price_watch_instant(WEBHOOK, "VU meter", "VU Meter Pro", 900, "https://x/5", 1000, dry_run=True)
+        assert len(rsps.calls) == 0
+
+
+@responses.activate
 def test_send_instant_raises_on_non_2xx():
     responses.add(responses.POST, WEBHOOK, body="invalid_payload", status=400)
 

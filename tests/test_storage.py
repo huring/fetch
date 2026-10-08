@@ -208,6 +208,29 @@ def test_clear_operational_data_keeps_searches_and_configs(conn, search_id):
     assert conn.execute("SELECT COUNT(*) AS n FROM searches").fetchone()["n"] == 1
 
 
+def test_clear_operational_data_resets_watched_item_check_state_but_keeps_the_item(conn):
+    from watcher import watched_items
+    from watcher.models import WatchedItem
+
+    item = watched_items.create_watched_item(
+        conn, WatchedItem(name="VU meter", url="https://example.com/vu", target_price=1000)
+    )
+    watched_items.record_check_result(conn, item.id, price=900, extracted_title="VU Meter Pro")
+    watched_items.record_alert(conn, item.id, 900)
+
+    storage.clear_operational_data(conn)
+
+    refreshed = watched_items.get_watched_item(conn, item.id)
+    assert refreshed is not None
+    assert refreshed.name == "VU meter"
+    assert refreshed.target_price == 1000
+    assert refreshed.current_price is None
+    assert refreshed.lowest_price_seen is None
+    assert refreshed.last_alert_price is None
+    assert refreshed.last_checked_at is None
+    assert refreshed.extracted_title == "VU Meter Pro"  # not check-run noise - kept
+
+
 def test_mark_stale_notified(conn, search_id):
     listing_id = storage.upsert_listing(conn, search_id, make_listing())
     storage.mark_stale_notified(conn, listing_id)

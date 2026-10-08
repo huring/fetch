@@ -290,6 +290,83 @@ def test_toggle_and_delete_search(client):
     assert "Bokhyllor" not in final_html
 
 
+def test_create_and_list_watched_item(client):
+    response = client.post(
+        "/watched-items/new",
+        data={
+            "name": "VU meter", "url": "https://example.com/vu-meter", "enabled": "on",
+            "target_price": "1000", "check_frequency": "weekly",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    list_html = client.get("/watched-items").text
+    assert "VU meter" in list_html
+    assert "weekly" in list_html
+
+
+def test_watched_item_round_trips_through_form(client):
+    client.post(
+        "/watched-items/new",
+        data={
+            "name": "VU meter", "url": "https://example.com/vu-meter", "enabled": "on",
+            "target_price": "1000", "check_frequency": "monthly", "find_used": "on",
+        },
+    )
+
+    from watcher import watched_items as watched_items_repo
+
+    conn = client.app.state.conn
+    item = next(i for i in watched_items_repo.list_watched_items(conn) if i.name == "VU meter")
+    assert item.target_price == 1000
+    assert item.check_frequency == "monthly"
+    assert item.find_used is True
+
+    edit_html = client.get(f"/watched-items/{item.id}/edit").text
+    assert 'value="1000"' in edit_html
+    assert 'value="monthly" selected' in edit_html
+
+
+def test_toggle_and_delete_watched_item(client):
+    client.post(
+        "/watched-items/new",
+        data={"name": "VU meter", "url": "https://example.com/vu-meter", "enabled": "on"},
+    )
+    from watcher import watched_items as watched_items_repo
+
+    conn = client.app.state.conn
+    item = next(i for i in watched_items_repo.list_watched_items(conn) if i.name == "VU meter")
+
+    client.post(f"/watched-items/{item.id}/toggle")
+    assert watched_items_repo.get_watched_item(conn, item.id).enabled is False
+
+    client.post(f"/watched-items/{item.id}/delete")
+    assert watched_items_repo.get_watched_item(conn, item.id) is None
+
+
+def test_check_watched_item_now_redirects_with_checked_param(client):
+    client.post(
+        "/watched-items/new",
+        data={"name": "VU meter", "url": "https://example.com/vu-meter", "enabled": "on"},
+    )
+    from watcher import watched_items as watched_items_repo
+
+    conn = client.app.state.conn
+    item = next(i for i in watched_items_repo.list_watched_items(conn) if i.name == "VU meter")
+
+    response = client.post(f"/watched-items/{item.id}/check", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/watched-items?checked={item.id}"
+
+
+def test_check_watched_item_now_unknown_id_redirects(client):
+    response = client.post("/watched-items/999999/check", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/watched-items"
+
+
 def test_marketplaces_list_shows_blocket(client):
     response = client.get("/marketplaces")
     assert response.status_code == 200
