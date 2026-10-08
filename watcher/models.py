@@ -93,6 +93,12 @@ class WatchedItem(BaseModel):
     # Everything below is check-run state, not admin-edited - see
     # watched_items.record_check_result/record_alert.
     extracted_title: Optional[str] = None
+    # A short description and a link to the product's own image (never
+    # downloaded/stored - just the URL), captured alongside the title/price
+    # so the admin UI can show a "is this the right item?" confirmation card
+    # (backlog #23). None until the first successful check.
+    extracted_description: Optional[str] = None
+    extracted_image_url: Optional[str] = None
     # e.g. "SEK", "USD" - whatever Claude read off the page. None until the
     # first successful check; Slack alerts fall back to "SEK" until then
     # (every watched item so far has been SEK, but that's just a fallback,

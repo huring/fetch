@@ -140,6 +140,8 @@ CREATE TABLE IF NOT EXISTS watched_items (
     find_used INTEGER NOT NULL DEFAULT 0,
     linked_search_id INTEGER REFERENCES searches(id) ON DELETE SET NULL,
     extracted_title TEXT,
+    extracted_description TEXT,
+    extracted_image_url TEXT,
     currency TEXT,
     current_price INTEGER,
     lowest_price_seen INTEGER,
@@ -352,6 +354,24 @@ def _migrate_add_watched_item_failure_tracking(conn: sqlite3.Connection) -> None
     conn.commit()
 
 
+def _migrate_add_watched_item_enrichment(conn: sqlite3.Connection) -> None:
+    """Adds extracted_description/extracted_image_url to a watched_items
+    table created before the "confirm this is the right item" card existed
+    (backlog #23) - a short description and a link to the product's own
+    image (never downloaded/stored, just the URL), captured from the page
+    alongside the title/price every check already extracts. No-op on a
+    fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "watched_items" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(watched_items)")}
+    if "extracted_description" not in columns:
+        conn.execute("ALTER TABLE watched_items ADD COLUMN extracted_description TEXT")
+    if "extracted_image_url" not in columns:
+        conn.execute("ALTER TABLE watched_items ADD COLUMN extracted_image_url TEXT")
+    conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -368,6 +388,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_auction_ends_at(conn)
     _migrate_add_watched_item_currency(conn)
     _migrate_add_watched_item_failure_tracking(conn)
+    _migrate_add_watched_item_enrichment(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

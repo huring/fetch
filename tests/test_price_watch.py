@@ -35,11 +35,17 @@ def make_settings(**overrides):
     return Settings(**base)
 
 
-def make_client(title="VU Meter Pro", price=900, currency="SEK", in_stock=True):
-    payload = {"title": title, "price": price, "currency": currency, "in_stock": in_stock}
+def make_client(title="VU Meter Pro", price=900, currency="SEK", in_stock=True, description=None, capture_prompt_into=None):
+    payload = {"title": title, "description": description, "price": price, "currency": currency, "in_stock": in_stock}
     content = [SimpleNamespace(type="text", text=json.dumps(payload))]
     message = SimpleNamespace(content=content, usage=SimpleNamespace(input_tokens=500, output_tokens=50))
-    return SimpleNamespace(messages=SimpleNamespace(create=lambda **kwargs: message))
+
+    def create(**kwargs):
+        if capture_prompt_into is not None:
+            capture_prompt_into.append(kwargs["messages"][0]["content"])
+        return message
+
+    return SimpleNamespace(messages=SimpleNamespace(create=create))
 
 
 def make_item(conn, **overrides):
@@ -94,6 +100,64 @@ def test_check_item_records_price_and_title():
     assert updated.current_price == 900
     assert updated.extracted_title == "VU Meter Pro"
     assert updated.last_checked_at is not None
+
+
+@responses.activate
+def test_check_item_records_description_and_image_from_jsonld():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+    conn = make_conn()
+    item = make_item(conn)
+    html = (
+        '<html><head><script type="application/ld+json">'
+        '{"@type": "Product", "name": "VU Meter Pro", "image": "https://example.com/vu.jpg"}'
+        "</script></head><body><h1>VU Meter Pro</h1><p>900 SEK</p></body></html>"
+    )
+    client = make_client(title="VU Meter Pro", price=900, description="A classic VU meter.")
+
+    with patch("watcher.price_watch.get_text", return_value=html):
+        price_watch.check_item(conn, client, make_settings(), item)
+
+    updated = watched_items.get_watched_item(conn, item.id)
+    assert updated.extracted_description == "A classic VU meter."
+    assert updated.extracted_image_url == "https://example.com/vu.jpg"
+
+
+@responses.activate
+def test_check_item_falls_back_to_og_image_without_jsonld():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+    conn = make_conn()
+    item = make_item(conn)
+    html = (
+        '<html><head><meta property="og:image" content="https://example.com/og.jpg"></head>'
+        "<body><h1>VU Meter Pro</h1><p>900 SEK</p></body></html>"
+    )
+    client = make_client(title="VU Meter Pro", price=900)
+
+    with patch("watcher.price_watch.get_text", return_value=html):
+        price_watch.check_item(conn, client, make_settings(), item)
+
+    assert watched_items.get_watched_item(conn, item.id).extracted_image_url == "https://example.com/og.jpg"
+
+
+@responses.activate
+def test_check_item_passes_jsonld_product_as_a_hint_to_claude():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+    conn = make_conn()
+    item = make_item(conn)
+    html = (
+        '<html><head><script type="application/ld+json">'
+        '{"@type": "Product", "name": "VU Meter Pro", "offers": {"price": "900", "priceCurrency": "SEK"}}'
+        "</script></head><body>irrelevant rendered text</body></html>"
+    )
+    prompts = []
+    client = make_client(title="VU Meter Pro", price=900, capture_prompt_into=prompts)
+
+    with patch("watcher.price_watch.get_text", return_value=html):
+        price_watch.check_item(conn, client, make_settings(), item)
+
+    assert len(prompts) == 1
+    assert "Structured product data" in prompts[0]
+    assert "900" in prompts[0]
 
 
 def test_check_item_alerts_when_at_or_below_target_price():

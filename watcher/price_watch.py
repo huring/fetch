@@ -5,10 +5,21 @@ schedule - independent of the search/marketplace machinery entirely.
 Unlike Blocket/Vinted/Rehifi, an arbitrary retailer's markup is unknown and
 changes without notice, so there's no per-site parser here - the fetched
 page's visible text is handed to Claude with a structured-output schema
-(price/title/in_stock) and it does the extraction. This degrades more
-gracefully than a regex scraper as a site's markup changes, at the cost of a
-small Claude call per check - negligible at the volume this is meant for (a
-handful of items, checked at most daily).
+(title/description/price/currency/in_stock) and it does the extraction. This
+degrades more gracefully than a regex scraper as a site's markup changes, at
+the cost of a small Claude call per check - negligible at the volume this is
+meant for (a handful of items, checked at most daily).
+
+When present, a page's own schema.org Product JSON-LD block (see
+sources/base.extract_jsonld_product) is quoted into the prompt ahead of the
+plain text and the extracted image comes from it (falling back to the page's
+OpenGraph og:image) - most e-commerce platforms emit this for Google's
+rich-snippet eligibility regardless of how the visible page itself is
+rendered, so it's often the only reliable source of price/availability on a
+JS-heavy page whose plain-text content never shows a price at all (backlog
+#23). The extracted description/image are shown in the admin UI as a small
+confirmation card ("is this the right item?") - never downloaded/stored,
+just linked to by URL.
 
 This is a single plain (non-batch) Claude call per item rather than going
 through the Message Batches API like listing scoring does: watched-item
@@ -28,6 +39,7 @@ regardless of whether the copy that turns up is new or used.
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import re
 from typing import Any, Dict, Optional
@@ -44,7 +56,7 @@ from watcher.notify import slack
 from watcher.scoring.claude_scorer import estimate_cost_usd
 from watcher.scoring.schema import strict_json_schema
 from watcher.settings import Settings
-from watcher.sources.base import get_text
+from watcher.sources.base import extract_jsonld_product, extract_og_image, get_text
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +66,11 @@ MAX_TOKENS = 1024
 # reviews) - capping keeps the Claude call cheap and focused. Generous enough
 # to comfortably include the actual product block on virtually any retailer.
 MAX_PAGE_TEXT_CHARS = 8000
+# Caps how much of a found JSON-LD Product block gets quoted into the
+# prompt - it's structured data, not prose, so this is generous relative to
+# MAX_PAGE_TEXT_CHARS without risking a pathological block (e.g. one that
+# embeds a huge review list) blowing up the request.
+MAX_JSONLD_HINT_CHARS = 2000
 
 _CHECK_INTERVALS: Dict[str, datetime.timedelta] = {
     "daily": datetime.timedelta(days=1),
@@ -72,6 +89,10 @@ _BLANK_LINES_RE = re.compile(r"\n\s*\n+")
 
 class _ExtractedProduct(BaseModel):
     title: str = Field(description="The product's name/title as shown on the page.")
+    description: Optional[str] = Field(
+        default=None,
+        description="A short (1-2 sentence) description of the product - enough for someone to confirm this is the right item, e.g. from the page's own product description or key specs. Null if the page has nothing usable.",
+    )
     price: Optional[int] = Field(
         default=None, description="The current price as a plain integer (no currency symbol/thousands separator), or null if not found."
     )
@@ -97,19 +118,23 @@ def _is_due(item: WatchedItem, now: datetime.datetime) -> bool:
     return (now - last) >= _CHECK_INTERVALS[item.check_frequency]
 
 
-def _extract_product(conn, client: Anthropic, settings: Settings, page_text: str) -> Optional[_ExtractedProduct]:
+def _extract_product(
+    conn, client: Anthropic, settings: Settings, page_text: str, structured_hint: Optional[Dict[str, Any]] = None
+) -> Optional[_ExtractedProduct]:
+    prompt = "Extract the product name, description, current price, currency and stock status from this product page.\n\n"
+    if structured_hint:
+        # A schema.org Product JSON-LD block, when present, is far more
+        # reliable than the rendered text below for price/availability -
+        # many retailer pages render their price client-side in JS, so the
+        # plain-text content alone never shows it at all (see backlog #23 -
+        # this is what was causing current_price to stay empty).
+        hint_json = json.dumps(structured_hint, ensure_ascii=False)[:MAX_JSONLD_HINT_CHARS]
+        prompt += f"Structured product data found on the page - prefer this over the free text below when they conflict:\n{hint_json}\n\n"
+    prompt += "Page text:\n" + page_text
     message = client.messages.create(
         model=settings.claude_model,
         max_tokens=MAX_TOKENS,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Extract the product name, current price, currency and stock status from this "
-                    "product page's text content:\n\n" + page_text
-                ),
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
         output_config={"format": {"type": "json_schema", "schema": _RESPONSE_SCHEMA}},
     )
     cost = estimate_cost_usd(
@@ -142,6 +167,18 @@ def _maybe_create_linked_search(conn, item: WatchedItem) -> None:
     )
     watched_items_repo.set_linked_search_id(conn, item.id, search.id)
     logger.info("Created linked 'find used' search %r for watched item %r", search.name, item.name)
+
+
+def _image_url_from_jsonld(product_jsonld: Dict[str, Any]) -> str:
+    image = product_jsonld.get("image")
+    if isinstance(image, str):
+        return image
+    if isinstance(image, list) and image:
+        first = image[0]
+        return first if isinstance(first, str) else (first.get("url", "") if isinstance(first, dict) else "")
+    if isinstance(image, dict):
+        return image.get("url", "")
+    return ""
 
 
 def _maybe_send_alert(conn, settings: Settings, item: WatchedItem, price: int, dry_run: bool) -> bool:
@@ -204,17 +241,24 @@ def check_item(conn, client: Anthropic, settings: Settings, item: WatchedItem, d
         _maybe_send_dead_alert(conn, settings, item, failures, dry_run)
         return {"checked": False, "alerted": False}
 
+    product_jsonld = extract_jsonld_product(html)
     page_text = _html_to_text(html)
-    product = _extract_product(conn, client, settings, page_text)
+    product = _extract_product(conn, client, settings, page_text, structured_hint=product_jsonld)
     if product is None:
         logger.warning("Could not extract product info for watched item %r", item.name)
         failures = watched_items_repo.record_check_failure(conn, item.id)
         _maybe_send_dead_alert(conn, settings, item, failures, dry_run)
         return {"checked": True, "alerted": False}
 
+    image_url = (_image_url_from_jsonld(product_jsonld) if product_jsonld else "") or extract_og_image(html)
     price = product.price if product.in_stock else None
+    logger.info(
+        "Watched item %r check: title=%r price=%s currency=%s in_stock=%s image=%s",
+        item.name, product.title, product.price, product.currency, product.in_stock, bool(image_url),
+    )
     watched_items_repo.record_check_result(
-        conn, item.id, price=price, extracted_title=product.title or None, currency=product.currency or None
+        conn, item.id, price=price, extracted_title=product.title or None, currency=product.currency or None,
+        description=product.description or None, image_url=image_url or None,
     )
 
     alerted = False

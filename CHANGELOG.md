@@ -4,6 +4,22 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-08
+- **Enriched watched items + likely fix for "current price" staying empty**
+  (was backlog #23) - the edit page now shows a small "is this the right
+  item?" card (a short description and the product's own image, linked to
+  its original URL - never downloaded or stored) once a check has succeeded
+  at least once, so it's easy to confirm a watched item is tracking the
+  product you actually meant. Along the way, found the likely cause of
+  "Current price" staying empty for some items: a watched item's page text
+  is handed to Claude for extraction, but on a JS-heavy retailer site the
+  price is often rendered client-side and never appears in the plain HTML
+  response at all. Most e-commerce platforms also emit a schema.org Product
+  JSON-LD block for Google's rich-snippet eligibility regardless of how the
+  visible page renders - that block (price/availability/image/description)
+  is now extracted and quoted into Claude's prompt ahead of the plain text,
+  and preferred when the two disagree, which should make price extraction
+  far more reliable on sites like this. Confirmed live against a real
+  product page (rehifi.se) end to end.
 - **Fixed every Blocket search for a "local" scope failing outright** (was
   backlog #26) - confirmed live that Blocket's own search API returns a 400
   for *any* request carrying a `location` parameter (tried as a plain county

@@ -103,6 +103,25 @@ def test_record_check_result_stores_and_keeps_currency(conn):
     assert watched_items.get_watched_item(conn, created.id).currency == "USD"
 
 
+def test_record_check_result_stores_and_keeps_description_and_image(conn):
+    created = watched_items.create_watched_item(conn, make_item())
+    watched_items.record_check_result(
+        conn, created.id, price=900, extracted_title="VU Meter Pro",
+        description="A classic VU meter.", image_url="https://example.com/vu.jpg",
+    )
+
+    item = watched_items.get_watched_item(conn, created.id)
+    assert item.extracted_description == "A classic VU meter."
+    assert item.extracted_image_url == "https://example.com/vu.jpg"
+
+    # A later check that doesn't resolve either (e.g. the page had no image
+    # this time) keeps what an earlier check already confirmed.
+    watched_items.record_check_result(conn, created.id, price=850, extracted_title=None)
+    item = watched_items.get_watched_item(conn, created.id)
+    assert item.extracted_description == "A classic VU meter."
+    assert item.extracted_image_url == "https://example.com/vu.jpg"
+
+
 def test_record_check_failure_increments_and_is_reset_by_success(conn):
     created = watched_items.create_watched_item(conn, make_item())
 

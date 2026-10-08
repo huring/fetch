@@ -67,9 +67,6 @@ Already mitigated (not fully fixed): `no_real_marketplace_fetches` in test_admin
 
 The real root cause for the remaining cases: `responses.add()` as used throughout the blocket/vinted/rehifi/auctionet source-adapter tests matches by URL only, not query string, so a stray call with a *different* search phrase to the *same* endpoint can silently consume a mock meant for the test's own call. Properly fixing this means adding strict query-string matching (`responses.matchers.query_param_matcher` or equivalent) across all of those tests - a real but separate, bounded piece of work, not something to do as a side effect of another task.
 
-## 23. Enrich watched items
-When fetching the item for the first time, save a card with info about the item - a short description, and if there is an apparent image to use, link to that image as well (don't download or save anything on the server). Do this to ensure that we're looking at the correct/same item. Also make sure the fields for "Current price" is filled in, at the moment it's empty for both my test items. 
-
 ## 24. Show status badge on searches page
 When "Run now" is clicked, update the status-badge to a yellow "running" badge while the search is running.
 

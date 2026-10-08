@@ -88,15 +88,21 @@ def record_check_result(
     price: Optional[int],
     extracted_title: Optional[str],
     currency: Optional[str] = None,
+    description: Optional[str] = None,
+    image_url: Optional[str] = None,
 ) -> None:
     """Updates check-run state after a *successful* check (the page was
     reachable and Claude could extract a product from it) - price=None here
     just means the item is currently out of stock, not that anything failed.
     current_price is cleared in that case (so an old price doesn't look
-    still current) but lowest_price_seen is left untouched. currency is kept
-    (COALESCE) the same way extracted_title is - it shouldn't change check to
-    check. Resets the check-failure streak (see record_check_failure) - a
-    genuinely failed check never reaches this function."""
+    still current) but lowest_price_seen is left untouched. currency,
+    description and image_url are all kept (COALESCE) the same way
+    extracted_title is - they shouldn't change check to check, and a check
+    that doesn't find one (e.g. a page with no image) shouldn't blank out
+    what an earlier check already confirmed (backlog #23's "is this the
+    right item?" card). Resets the check-failure streak (see
+    record_check_failure) - a genuinely failed check never reaches this
+    function."""
     row = conn.execute(
         "SELECT lowest_price_seen FROM watched_items WHERE id = ?", (item_id,)
     ).fetchone()
@@ -107,12 +113,14 @@ def record_check_result(
         """
         UPDATE watched_items SET
             current_price = ?, extracted_title = COALESCE(?, extracted_title),
+            extracted_description = COALESCE(?, extracted_description),
+            extracted_image_url = COALESCE(?, extracted_image_url),
             currency = COALESCE(?, currency),
             lowest_price_seen = ?, last_checked_at = datetime('now'),
             consecutive_check_failures = 0, dead_alert_sent = 0
         WHERE id = ?
         """,
-        (price, extracted_title, currency, lowest, item_id),
+        (price, extracted_title, description, image_url, currency, lowest, item_id),
     )
     conn.commit()
 

@@ -289,7 +289,7 @@ def list_watched_items(request: Request, checked: Optional[int] = None):
 def new_watched_item_form(request: Request):
     return templates.TemplateResponse(
         request, "watched_item_form.html",
-        {"form": _watched_item_to_form(None), "is_edit": False, "action_url": "/watched-items/new"},
+        {"form": _watched_item_to_form(None), "is_edit": False, "action_url": "/watched-items/new", "item": None},
     )
 
 
@@ -308,7 +308,7 @@ def edit_watched_item_form(request: Request, item_id: int):
     item = watched_items_repo.get_watched_item(conn, item_id)
     return templates.TemplateResponse(
         request, "watched_item_form.html",
-        {"form": _watched_item_to_form(item), "is_edit": True, "action_url": f"/watched-items/{item_id}/edit"},
+        {"form": _watched_item_to_form(item), "is_edit": True, "action_url": f"/watched-items/{item_id}/edit", "item": item},
     )
 
 

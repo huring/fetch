@@ -2,6 +2,24 @@
 {% block title %}{{ "Edit" if is_edit else "New" }} watched item - Fetch{% endblock %}
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">{{ "Edit" if is_edit else "New" }} watched item</h1>
+
+{% if item and (item.extracted_image_url or item.extracted_description or item.extracted_title) %}
+<div class="border border-gray-700 rounded-lg p-4 bg-gray-800 mb-4 flex gap-4">
+    {% if item.extracted_image_url %}
+    <img src="{{ item.extracted_image_url }}" alt="" class="w-24 h-24 object-cover rounded-md flex-shrink-0 bg-gray-900">
+    {% endif %}
+    <div class="text-sm min-w-0">
+        <div class="text-xs uppercase tracking-wide text-gray-400 mb-1">From the last check - is this the right item?</div>
+        <div class="font-medium text-gray-100">{{ item.extracted_title or item.name }}</div>
+        {% if item.extracted_description %}<p class="text-gray-400 mt-1">{{ item.extracted_description }}</p>{% endif %}
+        <div class="text-gray-400 mt-1">
+            {{ item.current_price if item.current_price is not none else "-" }}{{ " " ~ item.currency if item.current_price is not none and item.currency else "" }}
+            &middot; last checked {{ item.last_checked_at or "never" }}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <form method="post" action="{{ action_url }}" class="space-y-4">
     <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
         <legend class="text-sm font-semibold text-gray-200 px-1">Basics</legend>

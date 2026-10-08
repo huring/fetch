@@ -80,3 +80,55 @@ def extract_jsonld_description(html: str) -> str:
     except json.JSONDecodeError:
         return ""
     return data.get("description") or ""
+
+
+_JSONLD_ALL_RE = re.compile(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+
+
+def _iter_jsonld_blocks(html: str):
+    """Unlike _JSONLD_RE's callers above (which only ever look at a single,
+    known block on a page they control the shape of), an arbitrary retailer
+    page commonly embeds several JSON-LD blocks (breadcrumbs, organization,
+    product...), sometimes several entities wrapped together under one
+    "@graph" key - this walks all of them."""
+    for match in _JSONLD_ALL_RE.finditer(html):
+        try:
+            data = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list):
+            yield from (b for b in data if isinstance(b, dict))
+        elif isinstance(data, dict) and isinstance(data.get("@graph"), list):
+            yield from (b for b in data["@graph"] if isinstance(b, dict))
+        elif isinstance(data, dict):
+            yield data
+
+
+def extract_jsonld_product(html: str) -> Optional[Dict[str, Any]]:
+    """Best-effort extraction of a schema.org Product block from a page's
+    JSON-LD - used by watched-item price checks (watcher/price_watch.py) as
+    a far more reliable source of price/availability/image than scraping
+    rendered text, since most e-commerce platforms emit this for Google's
+    rich-snippet eligibility regardless of how the visible page itself is
+    rendered (including JS-rendered pages whose plain-text content never
+    shows a price at all). Returns None if no Product block is found."""
+    for block in _iter_jsonld_blocks(html):
+        type_ = block.get("@type")
+        types = type_ if isinstance(type_, list) else [type_]
+        if any(str(t).lower() == "product" for t in types if t):
+            return block
+    return None
+
+
+_OG_IMAGE_RE = re.compile(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', re.I)
+_OG_IMAGE_RE_ALT = re.compile(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', re.I)
+
+
+def extract_og_image(html: str) -> str:
+    """Best-effort fallback image URL for a page with no (or no parseable)
+    JSON-LD Product block - the OpenGraph og:image meta tag, present on
+    virtually any retailer page regardless of platform. Checks both
+    attribute orders since meta tags aren't consistently authored one way.
+    Returns "" if missing - never raises."""
+    match = _OG_IMAGE_RE.search(html) or _OG_IMAGE_RE_ALT.search(html)
+    return match.group(1) if match else ""

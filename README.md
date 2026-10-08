@@ -259,11 +259,23 @@ from a search: instead of a phrase matched against a marketplace, it's one
 exact product URL - any retailer, not just a registered marketplace - checked
 on its own schedule for a price drop. There's no per-site parser: the fetched
 page's text is handed to Claude with a structured-output schema to read off
-the current price, title and stock status, so it keeps working as a site's
-markup changes instead of a regex scraper quietly breaking. This is one plain
-(non-batch) Claude call per check, not the Batch API listing scoring uses -
-at the volume this is meant for (a handful of items, checked at most daily)
-the Batch API's 50% discount isn't worth its submit/collect bookkeeping.
+the current price, title, a short description and stock status, so it keeps
+working as a site's markup changes instead of a regex scraper quietly
+breaking. When present, the page's own schema.org Product JSON-LD block is
+quoted into the prompt ahead of the plain text and preferred for price/
+availability - most e-commerce platforms emit this for Google's rich-snippet
+eligibility regardless of how the visible page itself is rendered, so it's
+often the only reliable source of a price on a JS-heavy page whose plain-text
+content never shows one at all. This is one plain (non-batch) Claude call per
+check, not the Batch API listing scoring uses - at the volume this is meant
+for (a handful of items, checked at most daily) the Batch API's 50% discount
+isn't worth its submit/collect bookkeeping.
+
+The edit page shows a small "is this the right item?" card once a check has
+succeeded at least once: the description and an image, both confirming the
+check is reading the item you meant (the image is never downloaded or
+stored - just linked to by its original URL, taken from the same JSON-LD
+block, or the page's OpenGraph `og:image` tag if there's no JSON-LD).
 
 Fields: a name, the URL, an optional **target price** (alert on Slack the
 moment the price is at or below it - once alerted, it won't repeat daily at
