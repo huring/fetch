@@ -2,8 +2,7 @@
 {% block title %}Marketplaces - Fetch{% endblock %}
 {% block content %}
 <h1 class="text-xl font-semibold mb-1">Marketplaces</h1>
-<p class="text-sm text-gray-400 mb-4">Where searches are run and how often. Attach a marketplace to a search under that search's "Marketplaces" section.</p>
-{% if ran %}<p class="inline-flex px-3 py-1.5 rounded-md bg-green-900 text-green-300 text-sm mb-4">Triggered a manual run for {{ ran }} - check <a href="/health" class="underline">Health</a> shortly.</p>{% endif %}
+<p class="text-sm text-gray-400 mb-4">Where searches are run and how often. Attach a marketplace to a search under that search's "Marketplaces" section. To run something right now, use the "Run now" button on a specific search on the <a href="/searches" class="text-indigo-300 hover:text-indigo-200">Searches</a> page instead - a marketplace itself always runs every search attached to it, which usually isn't what you want when testing one.</p>
 <div class="overflow-x-auto bg-gray-800 border border-gray-700 rounded-lg">
     <table class="w-full text-sm">
         <thead>
@@ -26,9 +25,6 @@
                 </td>
                 <td class="px-3 py-2 whitespace-nowrap">
                     <a href="/marketplaces/{{ m.key }}/edit" class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs">Edit</a>
-                    <form class="inline" method="post" action="/marketplaces/{{ m.key }}/run">
-                        <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">Run now</button>
-                    </form>
                 </td>
             </tr>
         {% else %}

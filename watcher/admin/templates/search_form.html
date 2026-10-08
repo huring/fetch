@@ -33,6 +33,12 @@
             <input type="checkbox" id="scoring_mode_rated" name="scoring_mode" value="rated" {{ "checked" if form.scoring_mode == "rated" else "" }} class="w-4 h-4 accent-indigo-500">
             AI-rated <span class="font-normal text-xs text-gray-400">(off: a plain browsable list with no Claude involved, just the filters below - on: Claude also scores and reasons about every match using the criteria further down)</span>
         </label>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Daily digest style <span class="block font-normal text-xs text-gray-400">(how this search's non-instant matches show up in the once-daily Slack digest - "Itemized" lists every match, "Summary link" collapses them into one "N new items" line linking into the admin UI, for a high-volume search where itemizing would spam Slack)</span>
+            <select name="digest_style" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
+                <option value="itemized" {{ "selected" if form.digest_style == "itemized" else "" }}>Itemized</option>
+                <option value="summary_link" {{ "selected" if form.digest_style == "summary_link" else "" }}>Summary link</option>
+            </select>
+        </label>
     </fieldset>
 
     <fieldset id="plain-fields" class="border border-gray-700 rounded-lg p-4 bg-gray-800">

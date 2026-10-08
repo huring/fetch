@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 Scope = Literal["local", "national"]
 ScoringMode = Literal["plain", "rated"]
 CheckFrequency = Literal["daily", "weekly", "monthly"]
+DigestStyle = Literal["itemized", "summary_link"]
 
 
 class WatchedModel(BaseModel):
@@ -44,6 +45,15 @@ class Search(BaseModel):
     # Slack alert instead of waiting for the daily digest. None means every
     # match just waits for the digest.
     instant_alert_price: Optional[int] = None
+    # How this search's non-instant matches appear in the daily digest:
+    # "itemized" (today's behavior, one line per listing) or "summary_link"
+    # (one line - "N new items in <search name>" linking into the admin UI -
+    # for a high-volume search where itemizing every match would spam
+    # Slack). Default is "itemized" here (existing rows keep behaving
+    # exactly as before); the admin UI's new-search form defaults the
+    # *toggle* to summary_link instead, since that's the better default for
+    # a freshly created search per Lars's own framing of this feature.
+    digest_style: DigestStyle = "itemized"
     excluded_models: List[str] = Field(default_factory=list)
     excluded_words: List[str] = Field(default_factory=list)
     required_keywords: List[str] = Field(default_factory=list)
@@ -83,10 +93,21 @@ class WatchedItem(BaseModel):
     # Everything below is check-run state, not admin-edited - see
     # watched_items.record_check_result/record_alert.
     extracted_title: Optional[str] = None
+    # e.g. "SEK", "USD" - whatever Claude read off the page. None until the
+    # first successful check; Slack alerts fall back to "SEK" until then
+    # (every watched item so far has been SEK, but that's just a fallback,
+    # not an assumption baked into the check logic itself).
+    currency: Optional[str] = None
     current_price: Optional[int] = None
     lowest_price_seen: Optional[int] = None
     last_alert_price: Optional[int] = None
     last_checked_at: Optional[str] = None
+    # Liveness/sold-tracking parity with marketplace listings (backlog #6) -
+    # mirrors source_health's consecutive_failures/alert_sent pattern. Any
+    # check that can't read a price (fetch failed, or Claude couldn't parse
+    # the page) counts as a failure; a successful check resets both to zero.
+    consecutive_check_failures: int = 0
+    dead_alert_sent: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

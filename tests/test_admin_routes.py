@@ -302,6 +302,38 @@ def test_scoring_mode_round_trips_through_form(client):
     assert 'name="scoring_mode" value="rated" checked' in edit_html
 
 
+def test_new_search_form_defaults_digest_style_to_summary_link(client):
+    edit_html = client.get("/searches/new").text
+    assert 'value="summary_link" selected' in edit_html
+
+
+def test_digest_style_round_trips_through_form(client):
+    response = client.post(
+        "/searches/new",
+        data={
+            "name": "Vinyl hunt",
+            "enabled": "on",
+            "scope": "national",
+            "location": "",
+            "max_price": "",
+            "digest_style": "summary_link",
+            "search_phrases": "kind of blue",
+            "marketplaces": "blocket",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    from watcher import searches as searches_repo
+
+    conn = client.app.state.conn
+    search = next(s for s in searches_repo.list_searches(conn) if s.name == "Vinyl hunt")
+    assert search.digest_style == "summary_link"
+
+    edit_html = client.get(f"/searches/{search.id}/edit").text
+    assert 'value="summary_link" selected' in edit_html
+
+
 def test_plain_search_with_instant_alert_price_round_trips_through_form(client):
     response = client.post(
         "/searches/new",
@@ -463,6 +495,22 @@ def test_check_watched_item_now_unknown_id_redirects(client):
     assert response.headers["location"] == "/watched-items"
 
 
+def test_watched_items_list_shows_unreachable_badge_after_dead_alert(client):
+    from watcher import watched_items as watched_items_repo
+    from watcher.models import WatchedItem
+
+    conn = client.app.state.conn
+    item = watched_items_repo.create_watched_item(
+        conn, WatchedItem(name="VU meter", url="https://example.com/vu")
+    )
+    watched_items_repo.record_check_failure(conn, item.id)
+    watched_items_repo.mark_dead_alert_sent(conn, item.id)
+
+    response = client.get("/watched-items")
+
+    assert "unreachable" in response.text
+
+
 def test_marketplaces_list_shows_blocket(client):
     response = client.get("/marketplaces")
     assert response.status_code == 200
@@ -504,19 +552,23 @@ def test_marketplace_edit_unknown_key_redirects(client):
     assert response.headers["location"] == "/marketplaces"
 
 
-def test_run_marketplace_now_redirects_with_ran_param(client):
-    response = client.post("/marketplaces/blocket/run", follow_redirects=False)
+def test_run_search_now_redirects_with_ran_param(client):
+    from watcher import searches
+
+    search_id = searches.list_searches(client.app.state.conn)[0].id
+
+    response = client.post(f"/searches/{search_id}/run", follow_redirects=False)
     assert response.status_code == 303
-    assert response.headers["location"] == "/marketplaces?ran=blocket"
+    assert response.headers["location"] == f"/searches?ran={search_id}"
 
-    list_html = client.get("/marketplaces?ran=blocket").text
-    assert "Triggered a manual run for blocket" in list_html
+    list_html = client.get(f"/searches?ran={search_id}").text
+    assert "Triggered a manual run for" in list_html
 
 
-def test_run_marketplace_now_unknown_key_redirects(client):
-    response = client.post("/marketplaces/nonexistent/run", follow_redirects=False)
+def test_run_search_now_unknown_id_redirects(client):
+    response = client.post("/searches/999999/run", follow_redirects=False)
     assert response.status_code == 303
-    assert response.headers["location"] == "/marketplaces"
+    assert response.headers["location"] == "/searches"
 
 
 def test_clear_data_removes_listings_keeps_searches(client):

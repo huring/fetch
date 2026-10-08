@@ -160,16 +160,24 @@ def test_list_bucket_listings_filters_by_bucket(conn, search_id):
     assert {row["id"] for row in threshold} == {high}
 
 
-def test_get_scored_listings_excludes_pending_and_prefiltered(conn, search_id):
+def test_get_surfaced_listings_excludes_pending_and_prefiltered(conn, search_id):
     pending = storage.upsert_listing(conn, search_id, make_listing(external_id="pending"))
     excluded = storage.upsert_listing(conn, search_id, make_listing(external_id="excluded"))
     scored = storage.upsert_listing(conn, search_id, make_listing(external_id="scored"))
     storage.mark_prefiltered_out(conn, excluded, "too expensive")
     storage.mark_scored(conn, scored, 7, "r", [], "p")
 
-    rows = storage.get_scored_listings(conn)
+    rows = storage.get_surfaced_listings(conn)
     assert {row["id"] for row in rows} == {scored}
     assert rows[0]["search_name"] == "Test search"
+
+
+def test_get_surfaced_listings_includes_plain_surfaced(conn, search_id):
+    plain = storage.upsert_listing(conn, search_id, make_listing(external_id="plain"))
+    storage.mark_surfaced_plain(conn, plain)
+
+    rows = storage.get_surfaced_listings(conn)
+    assert {row["id"] for row in rows} == {plain}
 
 
 def test_insert_price_history_and_delete_listing(conn, search_id):

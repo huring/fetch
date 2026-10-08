@@ -109,6 +109,20 @@ def test_check_item_alerts_when_at_or_below_target_price():
     assert watched_items.get_watched_item(conn, item.id).last_alert_price == 900
 
 
+def test_check_item_records_currency_and_passes_it_to_the_alert():
+    conn = make_conn()
+    item = make_item(conn, target_price=1000)
+    client = make_client(price=900, currency="USD")
+
+    with patch("watcher.price_watch.get_text", return_value=HTML):
+        with patch("watcher.notify.slack.send_price_watch_instant") as send:
+            price_watch.check_item(conn, client, make_settings(), item)
+
+    assert watched_items.get_watched_item(conn, item.id).currency == "USD"
+    _, kwargs = send.call_args
+    assert kwargs.get("currency") == "USD"
+
+
 def test_check_item_does_not_alert_above_target_price():
     conn = make_conn()
     item = make_item(conn, target_price=500)
@@ -171,6 +185,58 @@ def test_check_item_fetch_failure_is_handled_gracefully():
         result = price_watch.check_item(conn, make_client(), make_settings(), item)
 
     assert result == {"checked": False, "alerted": False}
+    assert watched_items.get_watched_item(conn, item.id).consecutive_check_failures == 1
+
+
+def test_check_item_fetch_failure_sends_dead_alert_after_threshold():
+    conn = make_conn()
+    item = make_item(conn)
+    settings = make_settings(health_alert_after_n_failures=2)
+
+    with patch("watcher.price_watch.get_text", side_effect=Exception("boom")):
+        with patch("watcher.notify.slack.send_watched_item_dead_alert") as send:
+            price_watch.check_item(conn, make_client(), settings, item)
+            send.assert_not_called()
+            item = watched_items.get_watched_item(conn, item.id)
+
+            price_watch.check_item(conn, make_client(), settings, item)
+            send.assert_called_once()
+
+    assert watched_items.get_watched_item(conn, item.id).dead_alert_sent is True
+
+
+def test_check_item_does_not_repeat_the_dead_alert_once_already_sent():
+    conn = make_conn()
+    item = make_item(conn)
+    settings = make_settings(health_alert_after_n_failures=1)
+
+    with patch("watcher.price_watch.get_text", side_effect=Exception("boom")):
+        with patch("watcher.notify.slack.send_watched_item_dead_alert") as send:
+            price_watch.check_item(conn, make_client(), settings, item)
+            item = watched_items.get_watched_item(conn, item.id)
+            price_watch.check_item(conn, make_client(), settings, item)
+
+    send.assert_called_once()
+
+
+def test_check_item_success_resets_the_failure_streak():
+    conn = make_conn()
+    item = make_item(conn)
+    settings = make_settings(health_alert_after_n_failures=1)
+
+    with patch("watcher.price_watch.get_text", side_effect=Exception("boom")):
+        with patch("watcher.notify.slack.send_watched_item_dead_alert"):
+            price_watch.check_item(conn, make_client(), settings, item)
+    item = watched_items.get_watched_item(conn, item.id)
+    assert item.dead_alert_sent is True
+
+    with patch("watcher.price_watch.get_text", return_value=HTML):
+        with patch("watcher.notify.slack.send_price_watch_instant"):
+            price_watch.check_item(conn, make_client(), settings, item)
+
+    refreshed = watched_items.get_watched_item(conn, item.id)
+    assert refreshed.consecutive_check_failures == 0
+    assert refreshed.dead_alert_sent is False
 
 
 def test_check_item_unparsable_response_leaves_item_checked_but_not_priced():

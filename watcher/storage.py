@@ -261,7 +261,7 @@ def mark_notified_instant(conn: sqlite3.Connection, listing_id: int) -> None:
 def get_pending_digest(conn: sqlite3.Connection, score_min: int, score_max: int) -> List[sqlite3.Row]:
     return conn.execute(
         """
-        SELECT listings.*, searches.name AS search_name
+        SELECT listings.*, searches.name AS search_name, searches.digest_style AS search_digest_style
         FROM listings
         JOIN searches ON searches.id = listings.search_id
         WHERE listings.score BETWEEN ? AND ?
@@ -279,7 +279,7 @@ def get_pending_plain_digest(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     digest - the plain-search counterpart to get_pending_digest."""
     return conn.execute(
         """
-        SELECT listings.*, searches.name AS search_name
+        SELECT listings.*, searches.name AS search_name, searches.digest_style AS search_digest_style
         FROM listings
         JOIN searches ON searches.id = listings.search_id
         WHERE listings.score = ?
@@ -419,18 +419,21 @@ def get_top_listings(conn: sqlite3.Connection, limit: int = 5) -> List[sqlite3.R
     ).fetchall()
 
 
-def get_scored_listings(conn: sqlite3.Connection) -> List[sqlite3.Row]:
-    """Every listing that was actually scored by Claude (1-10, not pending
-    and not deterministically prefiltered out) across all searches, with its
-    search's name - the set the daily liveness sweep checks. Listings never
-    shown to the user (pending or prefiltered-out) aren't worth the extra
-    request."""
+def get_surfaced_listings(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """Every listing actually surfaced to the user - Claude-scored (1-10) or
+    plain-surfaced (-1, PLAIN_SURFACED_SCORE) - across all searches, with its
+    search's name. Excludes pending (NULL) and deterministically
+    prefiltered-out (0) listings, which were never shown to anyone and
+    aren't worth the extra liveness-check request. This is the set
+    watcher/liveness.py's run_liveness_sweep network-checks; a plain search's
+    matches need the same "confirmed gone"/stale handling a rated search's
+    do, not just Claude-scored ones."""
     return conn.execute(
         """
         SELECT listings.*, searches.name AS search_name
         FROM listings
         JOIN searches ON searches.id = listings.search_id
-        WHERE listings.score BETWEEN 1 AND 10
+        WHERE listings.score IS NOT NULL AND listings.score != 0
         """
     ).fetchall()
 

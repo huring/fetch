@@ -83,6 +83,49 @@ def test_sweep_removes_inactive_listing_and_records_price_history(tmp_path):
     assert history["score"] == 7
 
 
+def test_sweep_removes_inactive_plain_listing_too(tmp_path):
+    """Liveness/sold-tracking parity for plain searches (backlog #6): a
+    plain search's surfaced matches (score -1) must get the same
+    "confirmed gone" cleanup a rated search's scored listings do."""
+    conn = make_conn(tmp_path)
+    search = searches.create_search(
+        conn, Search(name="C", scoring_mode="plain", search_phrases=["onkyo"], marketplaces=["blocket"])
+    )
+    listing_id = storage.upsert_listing(conn, search.id, make_listing("1"))
+    storage.mark_surfaced_plain(conn, listing_id)
+
+    with patch("watcher.sources.blocket.check_active", return_value=False):
+        result = liveness.run_liveness_sweep(conn, make_settings())
+
+    assert result["checked"] == 1
+    assert result["removed"] == 1
+    assert conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone() is None
+    history = conn.execute("SELECT * FROM price_history").fetchone()
+    assert history["search_name"] == "C"
+    assert history["score"] == storage.PLAIN_SURFACED_SCORE
+
+
+def test_sweep_never_sends_stale_notice_for_a_plain_listing(tmp_path):
+    """A plain listing has no score to compare against score_digest_min, so
+    the "still listed after N days, might be worth a lower offer" nudge
+    (which only makes sense for a rated search's score) must never fire for
+    one, no matter how long it's been active."""
+    conn = make_conn(tmp_path)
+    search = searches.create_search(
+        conn, Search(name="C", scoring_mode="plain", search_phrases=["onkyo"], marketplaces=["blocket"])
+    )
+    listing_id = storage.upsert_listing(conn, search.id, make_listing("1"))
+    storage.mark_surfaced_plain(conn, listing_id)
+    _backdate_first_seen(conn, listing_id, days=liveness.STALE_AFTER_DAYS + 1)
+
+    with patch("watcher.sources.blocket.check_active", return_value=True):
+        result = liveness.run_liveness_sweep(conn, make_settings())
+
+    assert result["stale_notices_sent"] == 0
+    row = conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    assert row["stale_notified_at"] is None
+
+
 def test_sweep_leaves_active_recent_listing_untouched(tmp_path):
     conn = make_conn(tmp_path)
     search = searches.create_search(conn, Search(name="C", search_phrases=["onkyo"], marketplaces=["blocket"]))

@@ -4,6 +4,32 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-08
+- **Per-search manual trigger** (was backlog #1) - "Run now" moved from each
+  marketplace (which ran every search attached to it) to each search
+  instead, covering just that search across whichever marketplaces it's
+  attached to. Along the way, found and fixed a real latent bug this
+  surfaced: a search attached to more than one marketplace could have
+  enrichment run with the *wrong* marketplace's function against a row from
+  a different one, since the prefilter pass didn't look up each row's own
+  source - now it does, for both the per-search trigger and the regular
+  scheduled cycle.
+- **Per-search digest style** (was backlog #3) - a search can now be
+  "itemized" (the default - one Slack line per match, unchanged) or
+  "summary link" (one "N new items in &lt;search name&gt;" line instead,
+  linking into the admin UI if `PUBLIC_BASE_URL` is set - new searches
+  default to this one). Only changes the once-daily digest; an instant
+  alert is always itemized.
+- **Fixed watched-item price-watch alerts hardcoding "SEK"** (was backlog
+  #4) - now shows whatever currency Claude actually read off the page.
+- **Liveness/sold-tracking parity for plain searches and watched items**
+  (was backlog #6) - the daily liveness sweep now also re-checks a plain
+  search's surfaced matches, not just Claude-scored ones (it just skips the
+  score-based "still listed, might be worth a lower offer" nudge, which
+  only makes sense for a rated search). A watched item that fails
+  `HEALTH_ALERT_AFTER_N_FAILURES` checks in a row now gets a one-time "this
+  might be dead" Slack alert and an "unreachable" badge in the admin UI,
+  mirroring the existing marketplace source-health pattern, instead of
+  silently showing a stale price forever.
 - **Auction marketplace support + Auctionet adapter** (was backlog #19) -
   added a new `Marketplace.is_auction` flag/concept (rather than a separate
   adapter type) so a marketplace can be a live ascending-bid auction instead

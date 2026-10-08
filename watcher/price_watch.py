@@ -155,7 +155,7 @@ def _maybe_send_alert(conn, settings: Settings, item: WatchedItem, price: int, d
     try:
         slack.send_price_watch_instant(
             settings.slack_webhook_url, item.name, item.extracted_title or item.name, price, item.url, item.target_price,
-            dry_run=dry_run,
+            currency=item.currency or "SEK", dry_run=dry_run,
         )
         if not dry_run:
             watched_items_repo.record_alert(conn, item.id, price)
@@ -163,6 +163,28 @@ def _maybe_send_alert(conn, settings: Settings, item: WatchedItem, price: int, d
     except Exception as exc:
         logger.error("Failed to send price-watch alert for %r: %s", item.name, exc)
         return False
+
+
+def _maybe_send_dead_alert(
+    conn, settings: Settings, item: WatchedItem, consecutive_failures: int, dry_run: bool
+) -> None:
+    """Liveness/sold-tracking parity with marketplace listings (backlog #6):
+    mirrors source_health's "N failures in a row" alert, since a watched
+    item's URL otherwise never gets any "this might be dead" signal at
+    all - it would just sit there silently showing a stale price forever."""
+    if consecutive_failures < settings.health_alert_after_n_failures or item.dead_alert_sent:
+        return
+    if not settings.slack_webhook_url:
+        logger.warning("SLACK_WEBHOOK_URL not configured, skipping dead-link alert for %r", item.name)
+        return
+    try:
+        slack.send_watched_item_dead_alert(
+            settings.slack_webhook_url, item.name, item.url, consecutive_failures, dry_run=dry_run
+        )
+        if not dry_run:
+            watched_items_repo.mark_dead_alert_sent(conn, item.id)
+    except Exception as exc:
+        logger.error("Failed to send dead-link alert for %r: %s", item.name, exc)
 
 
 def check_item(conn, client: Anthropic, settings: Settings, item: WatchedItem, dry_run: bool = False) -> Dict[str, Any]:
@@ -178,17 +200,22 @@ def check_item(conn, client: Anthropic, settings: Settings, item: WatchedItem, d
         html = get_text(item.url, headers={"User-Agent": USER_AGENT})
     except Exception as exc:
         logger.warning("Could not fetch watched item %r (%s): %s", item.name, item.url, exc)
+        failures = watched_items_repo.record_check_failure(conn, item.id)
+        _maybe_send_dead_alert(conn, settings, item, failures, dry_run)
         return {"checked": False, "alerted": False}
 
     page_text = _html_to_text(html)
     product = _extract_product(conn, client, settings, page_text)
     if product is None:
         logger.warning("Could not extract product info for watched item %r", item.name)
-        watched_items_repo.record_check_result(conn, item.id, price=None, extracted_title=None)
+        failures = watched_items_repo.record_check_failure(conn, item.id)
+        _maybe_send_dead_alert(conn, settings, item, failures, dry_run)
         return {"checked": True, "alerted": False}
 
     price = product.price if product.in_stock else None
-    watched_items_repo.record_check_result(conn, item.id, price=price, extracted_title=product.title or None)
+    watched_items_repo.record_check_result(
+        conn, item.id, price=price, extracted_title=product.title or None, currency=product.currency or None
+    )
 
     alerted = False
     if price is not None:

@@ -1,13 +1,17 @@
-"""Daily liveness sweep: confirms whether previously-scored listings are
-still live, rather than inferring removal from search-result absence (which
-is unreliable - both Blocket and Vinted sort newest-first, so an old-but-
-still-active listing falls off the pages a regular fetch cycle sees purely
-because newer matches buried it, well before it's actually sold).
+"""Daily liveness sweep: confirms whether previously-surfaced listings (see
+storage.get_surfaced_listings - Claude-scored *or* a plain search's matches,
+not just rated ones) are still live, rather than inferring removal from
+search-result absence (which is unreliable - both Blocket and Vinted sort
+newest-first, so an old-but-still-active listing falls off the pages a
+regular fetch cycle sees purely because newer matches buried it, well
+before it's actually sold).
 
 For each listing a marketplace knows how to re-check (``check_active`` in
 its registry entry):
   * still live, and active >= STALE_AFTER_DAYS with a score that was ever
     worth surfacing -> a one-time "consider a lower offer" Slack notice.
+    (A plain search's listings never qualify here - they have no score to
+    compare against score_digest_min - they just get the removal check.)
   * no longer live -> captured into ``price_history`` (the raw material for
     future price-comparison stats) and deleted from ``listings``.
 
@@ -64,7 +68,7 @@ def run_liveness_sweep(conn: sqlite3.Connection, settings: Settings, dry_run: bo
     stale_notices_sent = 0
     errors = 0
 
-    for row in storage.get_scored_listings(conn):
+    for row in storage.get_surfaced_listings(conn):
         marketplace = get_marketplace(row["source"])
         if marketplace is None or marketplace.check_active is None:
             continue

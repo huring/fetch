@@ -23,6 +23,7 @@ def _row_to_item(row: sqlite3.Row) -> WatchedItem:
     data = dict(row)
     data["enabled"] = bool(data["enabled"])
     data["find_used"] = bool(data["find_used"])
+    data["dead_alert_sent"] = bool(data["dead_alert_sent"])
     return WatchedItem(**data)
 
 
@@ -86,11 +87,16 @@ def record_check_result(
     item_id: int,
     price: Optional[int],
     extracted_title: Optional[str],
+    currency: Optional[str] = None,
 ) -> None:
-    """Updates check-run state after a (successful or failed) price check.
-    price=None means extraction failed or the page is out of stock -
-    current_price is cleared (so an old price doesn't look still current) but
-    lowest_price_seen is left untouched."""
+    """Updates check-run state after a *successful* check (the page was
+    reachable and Claude could extract a product from it) - price=None here
+    just means the item is currently out of stock, not that anything failed.
+    current_price is cleared in that case (so an old price doesn't look
+    still current) but lowest_price_seen is left untouched. currency is kept
+    (COALESCE) the same way extracted_title is - it shouldn't change check to
+    check. Resets the check-failure streak (see record_check_failure) - a
+    genuinely failed check never reaches this function."""
     row = conn.execute(
         "SELECT lowest_price_seen FROM watched_items WHERE id = ?", (item_id,)
     ).fetchone()
@@ -101,11 +107,40 @@ def record_check_result(
         """
         UPDATE watched_items SET
             current_price = ?, extracted_title = COALESCE(?, extracted_title),
-            lowest_price_seen = ?, last_checked_at = datetime('now')
+            currency = COALESCE(?, currency),
+            lowest_price_seen = ?, last_checked_at = datetime('now'),
+            consecutive_check_failures = 0, dead_alert_sent = 0
         WHERE id = ?
         """,
-        (price, extracted_title, lowest, item_id),
+        (price, extracted_title, currency, lowest, item_id),
     )
+    conn.commit()
+
+
+def record_check_failure(conn: sqlite3.Connection, item_id: int) -> int:
+    """Updates check-run state after a *failed* check (the page couldn't be
+    fetched, or Claude couldn't extract a product from it) - mirrors
+    source_health's consecutive_failures tracking for marketplaces (backlog
+    #6: a watched item's URL never got the same "confirmed gone"/dead-link
+    handling). Returns the new consecutive-failure count."""
+    conn.execute(
+        """
+        UPDATE watched_items SET
+            consecutive_check_failures = consecutive_check_failures + 1,
+            last_checked_at = datetime('now')
+        WHERE id = ?
+        """,
+        (item_id,),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT consecutive_check_failures FROM watched_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    return row["consecutive_check_failures"]
+
+
+def mark_dead_alert_sent(conn: sqlite3.Connection, item_id: int) -> None:
+    conn.execute("UPDATE watched_items SET dead_alert_sent = 1 WHERE id = ?", (item_id,))
     conn.commit()
 
 

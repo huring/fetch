@@ -6,6 +6,8 @@
     <a href="/searches/new" class="inline-flex items-center px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">+ New search</a>
 </div>
 
+{% if ran_search_name %}<p class="inline-flex px-3 py-1.5 rounded-md bg-green-900 text-green-300 text-sm mb-6">Triggered a manual run for "{{ ran_search_name }}" - check <a href="/health" class="underline">Health</a> shortly.</p>{% endif %}
+
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
     <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
         <div class="text-xs uppercase tracking-wide text-gray-400">This month's Claude cost</div>
@@ -69,6 +71,9 @@
                 <td class="px-3 py-2 text-gray-500">-</td>
                 {% endif %}
                 <td class="px-3 py-2 whitespace-nowrap">
+                    <form class="inline" method="post" action="/searches/{{ s.id }}/run">
+                        <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">Run now</button>
+                    </form>
                     <form class="inline" method="post" action="/searches/{{ s.id }}/toggle">
                         <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">{{ 'Disable' if s.enabled else 'Enable' }}</button>
                     </form>

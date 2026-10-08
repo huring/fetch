@@ -27,7 +27,13 @@ from watcher import marketplace_configs as marketplace_configs_repo
 from watcher.admin.routes import router
 from watcher.liveness import run_auction_end_sweep, run_liveness_sweep
 from watcher.marketplaces import MARKETPLACES
-from watcher.pipeline import collect_finished_batches, run_marketplace_cycle, send_digest, submit_pending_scoring
+from watcher.pipeline import (
+    collect_finished_batches,
+    run_marketplace_cycle,
+    run_search_cycle,
+    send_digest,
+    submit_pending_scoring,
+)
 from watcher.price_watch import check_item, run_price_watch_sweep
 from watcher.seed import seed_default_searches
 from watcher.settings import Settings, load_settings
@@ -143,13 +149,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 except Exception:
                     logger.exception("Scheduled price-watch sweep failed")
 
-        def _run_now(key: str):
+        def _run_search_now(search_id: int):
             with scheduler_lock:
                 try:
-                    result = run_marketplace_cycle(scheduler_conn, settings, key, dry_run=settings.dry_run)
-                    logger.info("Manually-triggered marketplace run complete (%s): %s", key, result)
+                    result = run_search_cycle(scheduler_conn, settings, search_id, dry_run=settings.dry_run)
+                    logger.info("Manually-triggered search run complete (%s): %s", search_id, result)
                 except Exception:
-                    logger.exception("Manually-triggered marketplace run failed for %s", key)
+                    logger.exception("Manually-triggered search run failed for %s", search_id)
                     return
 
                 try:
@@ -168,7 +174,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     collect_result = collect_finished_batches(scheduler_conn, client, settings, dry_run=settings.dry_run)
                     logger.info("Scoring collect: %s", collect_result)
                 except Exception:
-                    logger.exception("Scoring submit/collect failed after manual run of %s", key)
+                    logger.exception("Scoring submit/collect failed after manual run of search %s", search_id)
 
         def _check_watched_item_now(item_id: int):
             with scheduler_lock:
@@ -184,12 +190,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 except Exception:
                     logger.exception("Manually-triggered watched-item check failed for %s", item.name)
 
-        def trigger_marketplace_run(key: str) -> None:
+        def trigger_search_run(search_id: int) -> None:
             # Runs on the scheduler's own thread, same as every other
             # scheduled job - never blocks the request that triggered it.
             # scheduler_lock means a run triggered while another job is in
             # progress queues up and runs right after, rather than racing it.
-            scheduler.add_job(_run_now, args=[key], next_run_time=datetime.datetime.now())
+            scheduler.add_job(_run_search_now, args=[search_id], next_run_time=datetime.datetime.now())
 
         def trigger_watched_item_check(item_id: int) -> None:
             scheduler.add_job(_check_watched_item_now, args=[item_id], next_run_time=datetime.datetime.now())
@@ -201,7 +207,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         scheduler.add_job(_price_watch_job, CronTrigger(hour=PRICE_WATCH_HOUR, minute=PRICE_WATCH_MINUTE))
         scheduler.start()
         app.state.scheduler = scheduler
-        app.state.trigger_marketplace_run = trigger_marketplace_run
+        app.state.trigger_search_run = trigger_search_run
         app.state.trigger_watched_item_check = trigger_watched_item_check
 
         yield

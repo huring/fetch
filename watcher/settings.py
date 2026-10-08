@@ -32,6 +32,13 @@ class Settings:
     slack_webhook_url: str
     dry_run: bool
     admin_port: int
+    # Optional - e.g. "http://fetch.home". Only used to build a clickable
+    # admin-UI link for a "summary_link"-style search's digest entry (see
+    # Search.digest_style) - every other Slack message links to the listing
+    # itself, not back into this admin UI, so this is the one place that
+    # needs to know its own public address. Left blank, that search's digest
+    # entry is just plain text (a count, no link).
+    public_base_url: str = ""
 
 
 def load_settings() -> Settings:
@@ -48,4 +55,5 @@ def load_settings() -> Settings:
         slack_webhook_url=os.environ.get("SLACK_WEBHOOK_URL", ""),
         dry_run=_bool_env("DRY_RUN", False),
         admin_port=int(os.environ.get("ADMIN_PORT", "8000")),
+        public_base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
     )

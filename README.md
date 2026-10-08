@@ -43,17 +43,19 @@ come back as a proper marketplace if/when it's needed.
    `HEALTH_ALERT_AFTER_N_FAILURES` (default 3) runs in a row, a warning goes
    to Slack. Blocket has no uptime guarantee for this kind of access, so this
    is the early-warning signal that something broke silently.
-7. **Liveness sweep** (once daily, 03:30 local) - every listing Claude has
-   actually scored gets re-checked directly against its own page, not
-   inferred from whether it still turns up in search results (unreliable:
-   both marketplaces sort newest-first, so an old-but-still-unsold listing
+7. **Liveness sweep** (once daily, 03:30 local) - every listing ever
+   surfaced to you (Claude-scored *or* a plain search's matches, not just
+   rated ones) gets re-checked directly against its own page, not inferred
+   from whether it still turns up in search results (unreliable: both
+   marketplaces sort newest-first, so an old-but-still-unsold listing
    naturally falls off the fetched pages well before it's actually gone).
    A listing confirmed gone is recorded into `price_history` (title, final
    price, score, how long it was active) and removed from the active list.
-   A listing still live after `STALE_AFTER_DAYS` (21, hardcoded in
+   A rated listing still live after `STALE_AFTER_DAYS` (21, hardcoded in
    `watcher/liveness.py`) that was ever worth surfacing (score >=
    `SCORE_DIGEST_MIN`) gets a one-time "might be worth a lower offer" Slack
-   notice.
+   notice - a plain listing has no score to compare, so it only ever gets
+   the removal check, never this nudge.
 
 Separately from all of the above, **watched items** track one exact product
 URL (any site) for a price drop on their own daily/weekly/monthly schedule -
@@ -118,6 +120,20 @@ search form; new searches default to plain):
   match 1-10 with reasoning, via the Batch API (see "Keeping Claude spend low"
   below). Good for "I'm not sure exactly what I want, judge it for me"
   searches.
+
+Independent of plain/rated, each search also has its own **digest style**:
+**itemized** (the default - one Slack line per match, same as always) or
+**summary link** (one line - "N new items in &lt;search name&gt;" - instead
+of itemizing every match; new searches default to this one). Meant for a
+high-volume search where itemizing every match would spam Slack (the
+classic case: a broad vinyl/record search with lots of hits where you'd
+rather just know *something* new showed up and go look). This only changes
+the once-daily digest - an instant alert (`instant_alert_price` for a plain
+search, or a high enough score for a rated one) is always itemized, since by
+definition it's about one specific standout match. The summary link needs
+`PUBLIC_BASE_URL` set (see `.env.example`) to actually be a clickable link
+into that search's matches; left unset, it's just plain text (a count, no
+link).
 
 Searches live in the same SQLite database as everything else and are managed
 entirely through the admin UI at `http://<host>:8000/searches` - there are no
@@ -197,15 +213,19 @@ This replaced a single global `POLL_INTERVAL_MINUTES` env var - if you set
 that previously, it no longer has any effect; set the interval per
 marketplace at `/marketplaces` instead.
 
-Each marketplace also has a **Run now** button there, for testing without
-waiting for its next scheduled tick - it runs on the scheduler's own
-background thread (same as a normal scheduled cycle), so clicking it doesn't
-block the page. Results show up in `/health` and the search list shortly
-after. The `/health` page has a matching **Clear listings & run history**
-action for wiping accumulated data back to a clean slate (searches and
-marketplace settings aren't touched) - handy after a change to what gets
-fetched or how it's scored, to confirm the new behavior from scratch rather
-than mixed in with old results.
+Each **search** (not marketplace) has a **Run now** button on `/searches`,
+for testing without waiting for its next scheduled tick - it runs just that
+one search, across whichever marketplaces it's attached to, not every search
+sharing a marketplace. It runs on the scheduler's own background thread
+(same as a normal scheduled cycle), so clicking it doesn't block the page,
+and it doesn't touch that marketplace's own poll cadence/health tracking -
+the regular scheduled tick keeps running on its own schedule regardless.
+Results show up in `/health` and the search list shortly after. The
+`/health` page has a matching **Clear listings & run history** action for
+wiping accumulated data back to a clean slate (searches and marketplace
+settings aren't touched) - handy after a change to what gets fetched or how
+it's scored, to confirm the new behavior from scratch rather than mixed in
+with old results.
 
 ### Auction marketplaces
 
@@ -250,8 +270,15 @@ moment the price is at or below it - once alerted, it won't repeat daily at
 the same or a higher price, only on a further drop), and a **check
 frequency** (daily/weekly/monthly - price drops aren't time-sensitive, so
 daily is just the default, not a requirement). A **Check now** button on the
-list page triggers an out-of-cycle check the same way a marketplace's **Run
+list page triggers an out-of-cycle check the same way a search's own **Run
 now** does.
+
+A watched item that fails `HEALTH_ALERT_AFTER_N_FAILURES` checks in a row
+(fetch failed, or Claude couldn't extract a product from the page - the same
+threshold and one-time-until-it-recovers pattern marketplace health alerts
+already use) gets a one-time "this might be dead" Slack notice and an
+"unreachable" badge on the list page, rather than silently sitting there
+showing a stale price forever. A later successful check clears both.
 
 **Find this item used**, if checked, also searches every registered
 marketplace for a used copy once the product's title is known from the

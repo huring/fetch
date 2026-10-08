@@ -38,6 +38,53 @@ def test_send_digest_groups_by_search():
     assert "Leak Stereo 130" in body
 
 
+@responses.activate
+def test_send_digest_summary_link_style_collapses_rated_entries_with_a_link():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    entries = {
+        "Vinyl hunt": [
+            ("Kind of Blue (LP)", 250, "https://x/2", 6, "nice pressing"),
+            ("A Love Supreme (LP)", 300, "https://x/3", 5, "decent copy"),
+        ],
+    }
+    slack.send_digest(
+        WEBHOOK, entries,
+        digest_styles={"Vinyl hunt": "summary_link"},
+        search_urls={"Vinyl hunt": "https://fetch.home/searches/1/listings?bucket=daily_roundup"},
+    )
+
+    body = responses.calls[0].request.body.decode()
+    assert "2 new items in Vinyl hunt" in body
+    assert "https://fetch.home/searches/1/listings?bucket=daily_roundup" in body
+    assert "Kind of Blue" not in body  # collapsed, not itemized
+    assert "nice pressing" not in body
+
+
+@responses.activate
+def test_send_digest_summary_link_style_singular_item_and_no_url():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    plain_entries = {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/2", None)]}
+    slack.send_digest(WEBHOOK, {}, plain_entries, digest_styles={"Vinyl hunt": "summary_link"})
+
+    body = responses.calls[0].request.body.decode()
+    assert "1 new item in Vinyl hunt" in body
+    assert "<http" not in body  # no search_urls entry - plain text, no link
+
+
+@responses.activate
+def test_send_digest_itemizes_a_search_with_no_digest_style_set():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    entries = {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/2", 6, "nice pressing")]}
+    slack.send_digest(WEBHOOK, entries)
+
+    body = responses.calls[0].request.body.decode()
+    assert "Kind of Blue" in body
+    assert "new item" not in body
+
+
 def test_send_digest_skips_when_empty():
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         slack.send_digest(WEBHOOK, {})
@@ -144,6 +191,24 @@ def test_send_health_alert():
 
 
 @responses.activate
+def test_send_watched_item_dead_alert():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    slack.send_watched_item_dead_alert(WEBHOOK, "VU meter", "https://x/8", 3)
+
+    body = responses.calls[0].request.body.decode()
+    assert "VU meter" in body
+    assert "3 checks in a row" in body
+    assert "https://x/8" in body
+
+
+def test_send_watched_item_dead_alert_dry_run_does_not_post():
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        slack.send_watched_item_dead_alert(WEBHOOK, "VU meter", "https://x/8", 3, dry_run=True)
+        assert len(rsps.calls) == 0
+
+
+@responses.activate
 def test_send_price_watch_instant_posts_formatted_text():
     responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
 
@@ -160,6 +225,18 @@ def test_send_price_watch_instant_dry_run_does_not_post():
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         slack.send_price_watch_instant(WEBHOOK, "VU meter", "VU Meter Pro", 900, "https://x/5", 1000, dry_run=True)
         assert len(rsps.calls) == 0
+
+
+@responses.activate
+def test_send_price_watch_instant_uses_the_item_s_own_currency():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    slack.send_price_watch_instant(WEBHOOK, "Amp", "Vintage Amp", 900, "https://x/7", 1000, currency="USD")
+
+    body = responses.calls[0].request.body.decode()
+    assert "900 USD" in body
+    assert "target: 1000 USD" in body
+    assert "SEK" not in body
 
 
 @responses.activate

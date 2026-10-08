@@ -84,17 +84,37 @@ DigestEntry = Tuple[str, Optional[int], str, int, str]  # title, price, url, sco
 PlainDigestEntry = Tuple[str, Optional[int], str, Optional[str]]
 
 
+def _digest_count_line(search_name: str, count: int, url: Optional[str]) -> str:
+    noun = "new item" if count == 1 else "new items"
+    text = f"{count} {noun} in {search_name}"
+    return f"- <{url}|{text}>" if url else f"- {text}"
+
+
 def format_digest(
     entries_by_search: Dict[str, List[DigestEntry]],
     plain_entries_by_search: Optional[Dict[str, List[PlainDigestEntry]]] = None,
+    digest_styles: Optional[Dict[str, str]] = None,
+    search_urls: Optional[Dict[str, str]] = None,
 ) -> str:
+    """digest_styles/search_urls: search_name -> "itemized"|"summary_link"
+    and search_name -> an admin-UI link for that search's matches - see
+    models.Search.digest_style. A search absent from digest_styles (or not
+    exactly "summary_link") is itemized, same as always."""
+    digest_styles = digest_styles or {}
+    search_urls = search_urls or {}
     lines = [":clipboard: *Daily digest*"]
     for search_name, entries in entries_by_search.items():
         lines.append(f"\n*{search_name}*")
+        if digest_styles.get(search_name) == "summary_link":
+            lines.append(_digest_count_line(search_name, len(entries), search_urls.get(search_name)))
+            continue
         for title, price, url, score, reasoning in entries:
             lines.append(f"- *<{url}|{title}>* ({score}/10, {_price_str(price)}) - {reasoning}")
     for search_name, entries in (plain_entries_by_search or {}).items():
         lines.append(f"\n*{search_name}*")
+        if digest_styles.get(search_name) == "summary_link":
+            lines.append(_digest_count_line(search_name, len(entries), search_urls.get(search_name)))
+            continue
         for title, price, url, auction_ends_at in entries:
             lines.append(f"- *<{url}|{title}>* - {_price_str(price)}{_auction_suffix(auction_ends_at)}")
     return "\n".join(lines)
@@ -104,11 +124,13 @@ def send_digest(
     webhook_url: str,
     entries_by_search: Dict[str, List[DigestEntry]],
     plain_entries_by_search: Optional[Dict[str, List[PlainDigestEntry]]] = None,
+    digest_styles: Optional[Dict[str, str]] = None,
+    search_urls: Optional[Dict[str, str]] = None,
     dry_run: bool = False,
 ) -> None:
     if not entries_by_search and not plain_entries_by_search:
         return
-    text = format_digest(entries_by_search, plain_entries_by_search)
+    text = format_digest(entries_by_search, plain_entries_by_search, digest_styles, search_urls)
     if dry_run:
         logger.info("[dry-run] would send Slack digest:\n%s", text)
         return
@@ -168,10 +190,10 @@ def send_stale_opportunity(
 
 
 def format_price_watch_instant(
-    item_name: str, title: str, price: int, url: str, target_price: Optional[int]
+    item_name: str, title: str, price: int, url: str, target_price: Optional[int], currency: str = "SEK"
 ) -> str:
-    target_note = f" (target: {target_price} SEK)" if target_price is not None else ""
-    return f":moneybag: *Price watch* - {item_name}\n*<{url}|{title}>* is now {price} SEK{target_note}"
+    target_note = f" (target: {target_price} {currency})" if target_price is not None else ""
+    return f":moneybag: *Price watch* - {item_name}\n*<{url}|{title}>* is now {price} {currency}{target_note}"
 
 
 def send_price_watch_instant(
@@ -181,9 +203,10 @@ def send_price_watch_instant(
     price: int,
     url: str,
     target_price: Optional[int],
+    currency: str = "SEK",
     dry_run: bool = False,
 ) -> None:
-    text = format_price_watch_instant(item_name, title, price, url, target_price)
+    text = format_price_watch_instant(item_name, title, price, url, target_price, currency)
     if dry_run:
         logger.info("[dry-run] would send price-watch Slack alert:\n%s", text)
         return
@@ -196,5 +219,22 @@ def send_health_alert(
     text = f":warning: *{source}* has failed {consecutive_failures} runs in a row.\nLast error: {last_error}"
     if dry_run:
         logger.info("[dry-run] would send Slack health alert:\n%s", text)
+        return
+    _post(webhook_url, text)
+
+
+def format_watched_item_dead_alert(item_name: str, url: str, consecutive_failures: int) -> str:
+    return (
+        f":warning: *{item_name}* has failed {consecutive_failures} checks in a row.\n"
+        f"The page might be gone or unreachable: {url}"
+    )
+
+
+def send_watched_item_dead_alert(
+    webhook_url: str, item_name: str, url: str, consecutive_failures: int, dry_run: bool = False
+) -> None:
+    text = format_watched_item_dead_alert(item_name, url, consecutive_failures)
+    if dry_run:
+        logger.info("[dry-run] would send watched-item dead-link Slack alert:\n%s", text)
         return
     _post(webhook_url, text)

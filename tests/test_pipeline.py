@@ -222,6 +222,40 @@ def test_send_digest_groups_by_search_and_marks_digested():
     assert row["included_in_digest_at"] is not None
 
 
+@responses.activate
+def test_send_digest_summary_link_search_collapses_entries_with_admin_url():
+    conn = make_conn()
+    search = searches.create_search(
+        conn, Search(name="Vinyl hunt", scoring_mode="rated", digest_style="summary_link")
+    )
+    listing_id = storage.upsert_listing(conn, search.id, make_listing("1", "Kind of Blue"))
+    storage.mark_scored(conn, listing_id, 6, "nice pressing", [], "fair price")
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    result = pipeline.send_digest(conn, make_settings(public_base_url="https://fetch.home"))
+
+    assert result["entries"] == 1
+    body = responses.calls[0].request.body.decode()
+    assert "1 new item in Vinyl hunt" in body
+    assert f"https://fetch.home/searches/{search.id}/listings?bucket=daily_roundup" in body
+    assert "Kind of Blue" not in body
+
+
+@responses.activate
+def test_send_digest_itemized_search_default_has_no_summary_link_text():
+    conn = make_conn()
+    search = searches.create_search(conn, Search(name="Vinyl hunt", scoring_mode="rated"))
+    listing_id = storage.upsert_listing(conn, search.id, make_listing("1", "Kind of Blue"))
+    storage.mark_scored(conn, listing_id, 6, "nice pressing", [], "fair price")
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    pipeline.send_digest(conn, make_settings())
+
+    body = responses.calls[0].request.body.decode()
+    assert "Kind of Blue" in body
+    assert "new item" not in body
+
+
 def test_run_once_enriches_blocket_description_before_scoring():
     conn = make_conn()
     searches.create_search(
@@ -378,6 +412,111 @@ def test_run_marketplace_cycle_unknown_key_raises():
     conn = make_conn()
     with pytest.raises(ValueError):
         pipeline.run_marketplace_cycle(conn, make_settings(), "nonexistent")
+
+
+def test_run_search_cycle_fetches_only_that_search():
+    conn = make_conn()
+    search = searches.create_search(
+        conn, Search(name="C", scoring_mode="rated", search_phrases=["onkyo"], marketplaces=["blocket"])
+    )
+    other_search = searches.create_search(
+        conn, Search(name="Other", scoring_mode="rated", search_phrases=["onkyo"], marketplaces=["blocket"])
+    )
+
+    with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Onkyo TX-NR656")]) as mock_fetch:
+        result = pipeline.run_search_cycle(conn, make_settings(), search.id)
+
+    mock_fetch.assert_called_once()  # not called once per search sharing that marketplace
+    assert result["search"] == "C"
+    assert result["listings_pending_scoring"] == 1
+    rows = conn.execute("SELECT * FROM listings").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["search_id"] == search.id
+    assert rows[0]["search_id"] != other_search.id
+
+
+def test_run_search_cycle_covers_every_marketplace_the_search_is_attached_to():
+    conn = make_conn()
+    search = searches.create_search(
+        conn, Search(name="C", scoring_mode="rated", search_phrases=["onkyo"], marketplaces=["blocket", "vinted"])
+    )
+
+    with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Onkyo A")]):
+        with patch("watcher.sources.vinted.fetch", return_value=[make_listing("2", "Onkyo B", description="x")]):
+            with patch("watcher.sources.vinted.fetch_item_description", return_value=""):
+                result = pipeline.run_search_cycle(conn, make_settings(), search.id)
+
+    assert result["listings_fetched"] == 2
+    assert result["listings_pending_scoring"] == 2
+
+
+def test_run_search_cycle_does_not_touch_marketplace_health_or_last_fetch_at():
+    conn = make_conn()
+    search = searches.create_search(
+        conn, Search(name="C", scoring_mode="rated", search_phrases=["onkyo"], marketplaces=["blocket"])
+    )
+
+    with patch("watcher.sources.blocket.fetch", return_value=[]):
+        pipeline.run_search_cycle(conn, make_settings(), search.id)
+
+    config = marketplace_configs.get_config(conn, "blocket")
+    assert config.last_fetch_at is None
+    assert conn.execute("SELECT * FROM source_health").fetchone() is None
+
+
+def test_run_search_cycle_unknown_search_id_raises():
+    conn = make_conn()
+    with pytest.raises(ValueError):
+        pipeline.run_search_cycle(conn, make_settings(), 999999)
+
+
+def test_run_search_cycle_uses_each_row_s_own_marketplace_for_enrichment():
+    """Regression test: a search attached to more than one marketplace
+    produces pending rows from different sources in the same
+    get_pending_listings() result - enrichment must look up each row's own
+    marketplace, not assume whichever marketplace most recently fetched."""
+    conn = make_conn()
+    search = searches.create_search(
+        conn, Search(name="C", scoring_mode="rated", search_phrases=["onkyo"], marketplaces=["blocket", "vinted"])
+    )
+    blocket_listing = SimpleNamespace(
+        source="blocket", external_id="1", title="Onkyo A", description="",
+        price=1000, url="https://example.com/1", location=None, ships=None,
+        published_at=None, auction_ends_at=None, raw={},
+    )
+    vinted_listing = SimpleNamespace(
+        source="vinted", external_id="2", title="Onkyo B", description="",
+        price=1000, url="https://example.com/2", location=None, ships=None,
+        published_at=None, auction_ends_at=None, raw={},
+    )
+
+    with patch("watcher.sources.blocket.fetch", return_value=[blocket_listing]):
+        with patch("watcher.sources.vinted.fetch", return_value=[vinted_listing]):
+            with patch("watcher.sources.blocket.fetch_ad_description", return_value="Blocket desc") as blocket_enrich:
+                with patch("watcher.sources.vinted.fetch_item_description", return_value="Vinted desc") as vinted_enrich:
+                    pipeline.run_search_cycle(conn, make_settings(), search.id)
+
+    blocket_enrich.assert_called_once()
+    vinted_enrich.assert_called_once()
+    rows = {row["external_id"]: row["description"] for row in conn.execute("SELECT * FROM listings")}
+    assert rows["1"] == "Blocket desc"
+    assert rows["2"] == "Vinted desc"
+
+
+def test_run_search_cycle_skips_a_marketplace_no_longer_registered():
+    conn = make_conn()
+    search = searches.create_search(
+        conn,
+        Search(
+            name="C", scoring_mode="rated", search_phrases=["onkyo"],
+            marketplaces=["blocket", "nonexistent-marketplace"],
+        ),
+    )
+
+    with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Onkyo A")]):
+        result = pipeline.run_search_cycle(conn, make_settings(), search.id)
+
+    assert result["listings_fetched"] == 1
 
 
 def test_submit_pending_scoring_batches_per_search_chunked():

@@ -29,15 +29,15 @@ import logging
 import sqlite3
 import time
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from anthropic import Anthropic
 
 from watcher import marketplace_configs as marketplace_configs_repo
 from watcher import searches as searches_repo
 from watcher import storage
-from watcher.marketplaces import MARKETPLACES, get as get_marketplace
-from watcher.models import Listing, Search
+from watcher.marketplaces import MARKETPLACES, Marketplace, get as get_marketplace
+from watcher.models import Listing, MarketplaceConfig, Search
 from watcher.notify import slack
 from watcher.scoring import claude_scorer
 from watcher.scoring.claude_scorer import estimate_cost_usd
@@ -84,6 +84,88 @@ def _maybe_send_plain_instant_alert(
         logger.error("Failed to send plain price alert: %s", exc)
 
 
+def _fetch_for_search(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    marketplace: Marketplace,
+    config: MarketplaceConfig,
+    search: Search,
+) -> Dict[str, int]:
+    """Fetches one search's phrases from one marketplace and stores the
+    results - just the network/upsert part, no prefiltering. Deliberately
+    split from _prefilter_pending_for_search below: a search attached to
+    more than one marketplace (run_search_cycle, a manual "run this search
+    now" trigger that covers every marketplace it's attached to in one go)
+    must only prefilter its pending rows *once*, not once per marketplace -
+    otherwise an earlier marketplace's still-pending rated rows (score stays
+    NULL until Claude scores them) would get rescanned and recounted on every
+    later marketplace's pass too."""
+    errors = 0
+    attempts = 0
+    items_fetched = 0
+
+    listings: List[Listing] = []
+    for phrase in search.search_phrases:
+        attempts += 1
+        try:
+            fetched = marketplace.fetch(phrase, search=search, config=config, settings=settings)
+            items_fetched += len(fetched)
+            listings.extend(fetched)
+        except SourceError as exc:
+            logger.error("%s fetch failed for search %r: %s", marketplace.display_name, search.name, exc)
+            errors += 1
+        time.sleep(config.request_delay_seconds)
+
+    listings = _filter_by_scope(listings, search)
+    total_fetched = len(listings)
+    for listing in listings:
+        storage.upsert_listing(conn, search.id, listing)
+
+    return {"attempts": attempts, "errors": errors, "items_fetched": items_fetched, "total_fetched": total_fetched}
+
+
+def _prefilter_pending_for_search(conn: sqlite3.Connection, settings: Settings, search: Search, dry_run: bool) -> int:
+    """Prefilters every currently-pending listing for one search, regardless
+    of which marketplace fetched it. Each row's enrichment (if any) is
+    looked up from its own `source` rather than assumed to match whichever
+    marketplace most recently fetched for this search - a search can be
+    attached to more than one marketplace, and get_pending_listings returns
+    every still-pending row for the search, not just ones from one of them."""
+    total_pending = 0
+    pending_rows = storage.get_pending_listings(conn, search.id)
+    for row in pending_rows:
+        ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
+        if not ok:
+            storage.mark_prefiltered_out(conn, row["id"], reason)
+            continue
+
+        row_marketplace = get_marketplace(row["source"])
+        if row_marketplace is not None and row_marketplace.enrich_description and not row["description"]:
+            description = row_marketplace.enrich_description(row["url"])
+            row_config = marketplace_configs_repo.get_config(conn, row["source"])
+            if row_config is not None:
+                time.sleep(row_config.request_delay_seconds)
+            if description:
+                storage.update_description(conn, row["id"], description)
+                row = dict(row)
+                row["description"] = description
+                ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
+                if not ok:
+                    storage.mark_prefiltered_out(conn, row["id"], reason)
+                    continue
+
+        # A "rated" listing is simply left pending (score IS NULL) for
+        # the next scoring submit sweep; a "plain" one has no Claude
+        # step at all, so it's surfaced immediately.
+        if search.scoring_mode == "plain":
+            storage.mark_surfaced_plain(conn, row["id"])
+            _maybe_send_plain_instant_alert(conn, settings, search, row, dry_run)
+
+        total_pending += 1
+
+    return total_pending
+
+
 def run_marketplace_cycle(
     conn: sqlite3.Connection, settings: Settings, marketplace_key: str, dry_run: bool = False
 ) -> Dict[str, Any]:
@@ -109,52 +191,12 @@ def run_marketplace_cycle(
 
     try:
         for search in touched_searches:
-            listings: List[Listing] = []
-            for phrase in search.search_phrases:
-                attempts += 1
-                try:
-                    fetched = marketplace.fetch(phrase, search=search, config=config, settings=settings)
-                    items_fetched += len(fetched)
-                    listings.extend(fetched)
-                except SourceError as exc:
-                    logger.error(
-                        "%s fetch failed for search %r: %s", marketplace.display_name, search.name, exc
-                    )
-                    errors += 1
-                time.sleep(config.request_delay_seconds)
-
-            listings = _filter_by_scope(listings, search)
-            total_fetched += len(listings)
-            for listing in listings:
-                storage.upsert_listing(conn, search.id, listing)
-
-            pending_rows = storage.get_pending_listings(conn, search.id)
-            for row in pending_rows:
-                ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
-                if not ok:
-                    storage.mark_prefiltered_out(conn, row["id"], reason)
-                    continue
-
-                if marketplace.enrich_description and not row["description"]:
-                    description = marketplace.enrich_description(row["url"])
-                    time.sleep(config.request_delay_seconds)
-                    if description:
-                        storage.update_description(conn, row["id"], description)
-                        row = dict(row)
-                        row["description"] = description
-                        ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
-                        if not ok:
-                            storage.mark_prefiltered_out(conn, row["id"], reason)
-                            continue
-
-                # A "rated" listing is simply left pending (score IS NULL) for
-                # the next scoring submit sweep; a "plain" one has no Claude
-                # step at all, so it's surfaced immediately.
-                if search.scoring_mode == "plain":
-                    storage.mark_surfaced_plain(conn, row["id"])
-                    _maybe_send_plain_instant_alert(conn, settings, search, row, dry_run)
-
-                total_pending += 1
+            result = _fetch_for_search(conn, settings, marketplace, config, search)
+            attempts += result["attempts"]
+            errors += result["errors"]
+            items_fetched += result["items_fetched"]
+            total_fetched += result["total_fetched"]
+            total_pending += _prefilter_pending_for_search(conn, settings, search, dry_run)
 
         if attempts > 0:
             healthy = errors < attempts and items_fetched > 0
@@ -191,6 +233,55 @@ def run_marketplace_cycle(
         }
     except Exception as exc:
         logger.exception("Run %s (%s) failed", run_id, marketplace_key)
+        storage.finish_run(conn, run_id, status="error", error_message=str(exc))
+        raise
+
+
+def run_search_cycle(conn: sqlite3.Connection, settings: Settings, search_id: int, dry_run: bool = False) -> Dict[str, Any]:
+    """Fetches and prefilters just one search, across whichever marketplaces
+    it's configured for - the manual "run this search now" trigger (one per
+    search, not one per marketplace - see searches_list.html/routes.py).
+    Never calls Claude, same as run_marketplace_cycle.
+
+    Deliberately doesn't touch marketplace_configs.last_fetch_at or
+    source_health: those track each marketplace's own scheduled polling
+    cadence and reliability, which a manual one-off trigger for a single
+    search shouldn't perturb - the regular scheduled tick keeps running on
+    its own schedule regardless of this having just run."""
+    search = searches_repo.get_search(conn, search_id)
+    if search is None:
+        raise ValueError(f"Unknown search id {search_id!r}")
+
+    run_id = storage.start_run(conn)
+    total_fetched = 0
+
+    try:
+        for marketplace_key in search.marketplaces:
+            marketplace = get_marketplace(marketplace_key)
+            if marketplace is None:
+                logger.warning("Search %r references unknown marketplace %r - skipping", search.name, marketplace_key)
+                continue
+            config = marketplace_configs_repo.get_config(conn, marketplace_key)
+            if config is None:
+                logger.warning("No marketplace_configs row for %r - skipping", marketplace_key)
+                continue
+
+            result = _fetch_for_search(conn, settings, marketplace, config, search)
+            total_fetched += result["total_fetched"]
+
+        total_pending = _prefilter_pending_for_search(conn, settings, search, dry_run)
+
+        storage.finish_run(
+            conn, run_id, status="ok", searches_processed=1, listings_fetched=total_fetched, listings_new=total_pending,
+        )
+        return {
+            "run_id": run_id,
+            "search": search.name,
+            "listings_fetched": total_fetched,
+            "listings_pending_scoring": total_pending,
+        }
+    except Exception as exc:
+        logger.exception("Run %s (search %r) failed", run_id, search.name)
         storage.finish_run(conn, run_id, status="error", error_message=str(exc))
         raise
 
@@ -392,27 +483,50 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
     return aggregate
 
 
+def _search_admin_url(settings: Settings, search_id: int, bucket: str) -> Optional[str]:
+    """A link into this search's own listings for a "summary_link"-style
+    digest entry (see models.Search.digest_style) - None if
+    PUBLIC_BASE_URL isn't configured, in which case that entry is just
+    plain text (a count, no link)."""
+    if not settings.public_base_url:
+        return None
+    return f"{settings.public_base_url}/searches/{search_id}/listings?bucket={bucket}"
+
+
 def send_digest(conn: sqlite3.Connection, settings: Settings, dry_run: bool = False) -> Dict[str, Any]:
     rows = storage.get_pending_digest(conn, settings.score_digest_min, settings.score_instant_threshold - 1)
     plain_rows = storage.get_pending_plain_digest(conn)
 
     grouped: Dict[str, List[slack.DigestEntry]] = {}
     plain_grouped: Dict[str, List[slack.PlainDigestEntry]] = {}
+    digest_styles: Dict[str, str] = {}
+    search_urls: Dict[str, str] = {}
     ids: List[int] = []
     for row in rows:
         grouped.setdefault(row["search_name"], []).append(
             (row["title"], row["price"], row["url"], row["score"], row["reasoning"])
         )
+        digest_styles[row["search_name"]] = row["search_digest_style"]
+        url = _search_admin_url(settings, row["search_id"], "daily_roundup")
+        if url:
+            search_urls[row["search_name"]] = url
         ids.append(row["id"])
     for row in plain_rows:
         plain_grouped.setdefault(row["search_name"], []).append(
             (row["title"], row["price"], row["url"], row["auction_ends_at"])
         )
+        digest_styles[row["search_name"]] = row["search_digest_style"]
+        url = _search_admin_url(settings, row["search_id"], "found")
+        if url:
+            search_urls[row["search_name"]] = url
         ids.append(row["id"])
 
     if grouped or plain_grouped:
         if settings.slack_webhook_url:
-            slack.send_digest(settings.slack_webhook_url, grouped, plain_grouped, dry_run=dry_run)
+            slack.send_digest(
+                settings.slack_webhook_url, grouped, plain_grouped,
+                digest_styles=digest_styles, search_urls=search_urls, dry_run=dry_run,
+            )
         else:
             logger.warning("SLACK_WEBHOOK_URL not configured, skipping digest with %d entries", len(ids))
 

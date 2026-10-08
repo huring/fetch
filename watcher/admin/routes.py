@@ -54,7 +54,7 @@ def _search_to_form(search: Optional[Search]) -> dict:
     if search is None:
         return dict(
             name="", enabled=True, scope="local", location="", require_shipping=False, max_price="",
-            min_price="", scoring_mode="plain", instant_alert_price="",
+            min_price="", scoring_mode="plain", instant_alert_price="", digest_style="summary_link",
             excluded_models="", excluded_words="", required_keywords="",
             hard_criteria="", soft_criteria="", watched_models="",
             search_phrases="", marketplaces=[],
@@ -69,6 +69,7 @@ def _search_to_form(search: Optional[Search]) -> dict:
         min_price=search.min_price if search.min_price is not None else "",
         scoring_mode=search.scoring_mode,
         instant_alert_price=search.instant_alert_price if search.instant_alert_price is not None else "",
+        digest_style=search.digest_style,
         excluded_models=_list_to_lines(search.excluded_models),
         excluded_words=_list_to_lines(search.excluded_words),
         required_keywords=_list_to_lines(search.required_keywords),
@@ -85,6 +86,7 @@ def _form_to_search(form_data) -> Search:
     min_price = form_data.get("min_price", "")
     instant_alert_price = form_data.get("instant_alert_price", "")
     scoring_mode = "rated" if form_data.get("scoring_mode") == "rated" else "plain"
+    digest_style = "summary_link" if form_data.get("digest_style") == "summary_link" else "itemized"
     marketplaces = [key for key in form_data.getlist("marketplaces") if key in MARKETPLACES]
     return Search(
         name=form_data.get("name", ""),
@@ -96,6 +98,7 @@ def _form_to_search(form_data) -> Search:
         min_price=int(min_price) if min_price.strip() else None,
         scoring_mode=scoring_mode,
         instant_alert_price=int(instant_alert_price) if instant_alert_price.strip() else None,
+        digest_style=digest_style,
         excluded_models=_lines_to_list(form_data.get("excluded_models", "")),
         excluded_words=_lines_to_list(form_data.get("excluded_words", "")),
         required_keywords=_lines_to_list(form_data.get("required_keywords", "")),
@@ -113,16 +116,20 @@ def index() -> RedirectResponse:
 
 
 @router.get("/searches", response_class=HTMLResponse)
-def list_searches(request: Request):
+def list_searches(request: Request, ran: Optional[int] = None):
     conn = request.app.state.conn
     settings = request.app.state.settings
     all_searches = searches_repo.list_searches(conn)
     counts = storage.get_search_bucket_counts(conn, settings.score_digest_min, settings.score_instant_threshold)
     overview = storage.get_overview_stats(conn, settings.score_digest_min, settings.score_instant_threshold)
     top_listings = storage.get_top_listings(conn)
+    ran_search_name = next((s.name for s in all_searches if s.id == ran), None) if ran is not None else None
     return templates.TemplateResponse(
         request, "searches_list.html",
-        {"searches": all_searches, "counts": counts, "overview": overview, "top_listings": top_listings},
+        {
+            "searches": all_searches, "counts": counts, "overview": overview, "top_listings": top_listings,
+            "ran_search_name": ran_search_name,
+        },
     )
 
 
@@ -235,6 +242,14 @@ def delete_search(request: Request, search_id: int):
     return RedirectResponse("/searches", status_code=303)
 
 
+@router.post("/searches/{search_id}/run")
+def run_search_now(request: Request, search_id: int):
+    if searches_repo.get_search(request.app.state.conn, search_id) is None:
+        return RedirectResponse("/searches", status_code=303)
+    request.app.state.trigger_search_run(search_id)
+    return RedirectResponse(f"/searches?ran={search_id}", status_code=303)
+
+
 def _watched_item_to_form(item: Optional[WatchedItem]) -> dict:
     if item is None:
         return dict(name="", url="", enabled=True, target_price="", check_frequency="daily", find_used=False)
@@ -338,7 +353,7 @@ def check_watched_item_now(request: Request, item_id: int):
 
 
 @router.get("/marketplaces", response_class=HTMLResponse)
-def list_marketplaces(request: Request, ran: Optional[str] = None):
+def list_marketplaces(request: Request):
     conn = request.app.state.conn
     configs = {c.key: c for c in marketplace_configs_repo.list_configs(conn)}
     rows = []
@@ -355,7 +370,7 @@ def list_marketplaces(request: Request, ran: Optional[str] = None):
                 "is_auction": marketplace.is_auction,
             }
         )
-    return templates.TemplateResponse(request, "marketplaces_list.html", {"marketplaces": rows, "ran": ran})
+    return templates.TemplateResponse(request, "marketplaces_list.html", {"marketplaces": rows})
 
 
 @router.get("/marketplaces/{key}/edit", response_class=HTMLResponse)
@@ -383,14 +398,6 @@ async def update_marketplace(request: Request, key: str):
     auth_updates = {f.key: form_data.get(f"auth__{f.key}", "") for f in marketplace.auth_fields}
     marketplace_configs_repo.update_config(conn, key, poll_interval_minutes, request_delay_seconds, auth_updates)
     return RedirectResponse("/marketplaces", status_code=303)
-
-
-@router.post("/marketplaces/{key}/run")
-def run_marketplace_now(request: Request, key: str):
-    if get_marketplace(key) is None:
-        return RedirectResponse("/marketplaces", status_code=303)
-    request.app.state.trigger_marketplace_run(key)
-    return RedirectResponse("/marketplaces?ran=" + key, status_code=303)
 
 
 @router.get("/health", response_class=HTMLResponse)

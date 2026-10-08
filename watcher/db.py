@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS searches (
     min_price INTEGER,
     scoring_mode TEXT NOT NULL DEFAULT 'rated',
     instant_alert_price INTEGER,
+    digest_style TEXT NOT NULL DEFAULT 'itemized',
     excluded_models TEXT NOT NULL DEFAULT '[]',
     excluded_words TEXT NOT NULL DEFAULT '[]',
     required_keywords TEXT NOT NULL DEFAULT '[]',
@@ -139,10 +140,13 @@ CREATE TABLE IF NOT EXISTS watched_items (
     find_used INTEGER NOT NULL DEFAULT 0,
     linked_search_id INTEGER REFERENCES searches(id) ON DELETE SET NULL,
     extracted_title TEXT,
+    currency TEXT,
     current_price INTEGER,
     lowest_price_seen INTEGER,
     last_alert_price INTEGER,
     last_checked_at TEXT,
+    consecutive_check_failures INTEGER NOT NULL DEFAULT 0,
+    dead_alert_sent INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -288,6 +292,22 @@ def _migrate_add_scoring_mode(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_add_digest_style(conn: sqlite3.Connection) -> None:
+    """Adds the digest_style column to a searches table created before
+    per-search digest formatting existed. Backfills to 'itemized' - the
+    behavior every existing search already has - so nothing changes for an
+    already-configured search; only a freshly created search's admin-UI
+    form defaults its toggle to 'summary_link'. No-op on a fresh DB or an
+    already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "searches" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(searches)")}
+    if "digest_style" not in columns:
+        conn.execute("ALTER TABLE searches ADD COLUMN digest_style TEXT NOT NULL DEFAULT 'itemized'")
+        conn.commit()
+
+
 def _migrate_add_auction_ends_at(conn: sqlite3.Connection) -> None:
     """Adds the auction_ends_at column (an auction marketplace's hard
     deadline, see models.Listing) to a listings table created before auction
@@ -299,6 +319,37 @@ def _migrate_add_auction_ends_at(conn: sqlite3.Connection) -> None:
     if "auction_ends_at" not in columns:
         conn.execute("ALTER TABLE listings ADD COLUMN auction_ends_at TEXT")
         conn.commit()
+
+
+def _migrate_add_watched_item_currency(conn: sqlite3.Connection) -> None:
+    """Adds the currency column to a watched_items table created before
+    price_watch.py tracked it (it previously only ever showed "SEK" in
+    Slack alerts regardless of what the page actually said). No-op on a
+    fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "watched_items" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(watched_items)")}
+    if "currency" not in columns:
+        conn.execute("ALTER TABLE watched_items ADD COLUMN currency TEXT")
+        conn.commit()
+
+
+def _migrate_add_watched_item_failure_tracking(conn: sqlite3.Connection) -> None:
+    """Adds consecutive_check_failures/dead_alert_sent to a watched_items
+    table created before check failures were tracked (backlog #6 - a
+    watched item's URL never got the same "confirmed gone"/dead-link
+    handling a marketplace's own source_health tracking already has). No-op
+    on a fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "watched_items" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(watched_items)")}
+    if "consecutive_check_failures" not in columns:
+        conn.execute("ALTER TABLE watched_items ADD COLUMN consecutive_check_failures INTEGER NOT NULL DEFAULT 0")
+    if "dead_alert_sent" not in columns:
+        conn.execute("ALTER TABLE watched_items ADD COLUMN dead_alert_sent INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
 
 
 def connect(db_path: str) -> sqlite3.Connection:
@@ -313,7 +364,10 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_stale_notified_at(conn)
     _migrate_add_min_price(conn)
     _migrate_add_scoring_mode(conn)
+    _migrate_add_digest_style(conn)
     _migrate_add_auction_ends_at(conn)
+    _migrate_add_watched_item_currency(conn)
+    _migrate_add_watched_item_failure_tracking(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

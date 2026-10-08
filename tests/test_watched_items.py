@@ -91,6 +91,41 @@ def test_record_check_result_with_no_price_clears_current_but_keeps_lowest(conn)
     assert item.last_checked_at is not None
 
 
+def test_record_check_result_stores_and_keeps_currency(conn):
+    created = watched_items.create_watched_item(conn, make_item())
+    watched_items.record_check_result(conn, created.id, price=900, extracted_title="VU Meter Pro", currency="USD")
+
+    assert watched_items.get_watched_item(conn, created.id).currency == "USD"
+
+    # A later check that doesn't resolve a currency (e.g. extraction failed)
+    # keeps the last known one rather than blanking it out.
+    watched_items.record_check_result(conn, created.id, price=None, extracted_title=None, currency=None)
+    assert watched_items.get_watched_item(conn, created.id).currency == "USD"
+
+
+def test_record_check_failure_increments_and_is_reset_by_success(conn):
+    created = watched_items.create_watched_item(conn, make_item())
+
+    assert watched_items.record_check_failure(conn, created.id) == 1
+    assert watched_items.record_check_failure(conn, created.id) == 2
+    assert watched_items.get_watched_item(conn, created.id).consecutive_check_failures == 2
+
+    watched_items.record_check_result(conn, created.id, price=900, extracted_title="VU Meter Pro")
+
+    item = watched_items.get_watched_item(conn, created.id)
+    assert item.consecutive_check_failures == 0
+    assert item.dead_alert_sent is False
+
+
+def test_mark_dead_alert_sent(conn):
+    created = watched_items.create_watched_item(conn, make_item())
+    assert watched_items.get_watched_item(conn, created.id).dead_alert_sent is False
+
+    watched_items.mark_dead_alert_sent(conn, created.id)
+
+    assert watched_items.get_watched_item(conn, created.id).dead_alert_sent is True
+
+
 def test_record_alert_and_set_linked_search_id(conn):
     created = watched_items.create_watched_item(conn, make_item())
 
