@@ -34,7 +34,7 @@ DEFAULT_SUB_CATEGORY = "1.93.3906"  # Ljud & Bild
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/120.0"
 
 
-def fetch(q: str, location: str = "", max_pages: int = 2) -> List[Listing]:
+def fetch(q: str, max_pages: int = 2) -> List[Listing]:
     """Fetch listings for a single Blocket search phrase.
 
     The response field names used in ``_parse_ad`` follow the shape documented
@@ -42,6 +42,14 @@ def fetch(q: str, location: str = "", max_pages: int = 2) -> List[Listing]:
     officially published schema. If Blocket changes its response shape,
     ``_parse_ad`` is the one place to fix - run with --dry-run after any
     change to confirm parsing still works.
+
+    No location/region filter is sent to Blocket's own search API - confirmed
+    live (2026-10, backlog #26) that the search endpoint 400s on *any*
+    `location` value, tried as a plain Swedish county name, a numeric code, or
+    lowercased, even paired with an otherwise-working query. A "local" scope
+    search's location match is already applied client-side after fetching
+    (see pipeline._filter_by_scope), so this isn't a loss of functionality,
+    just one fewer (broken) server-side round trip.
     """
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     listings: List[Listing] = []
@@ -53,8 +61,6 @@ def fetch(q: str, location: str = "", max_pages: int = 2) -> List[Listing]:
             "sort": "PUBLISHED_DESC",
             "page": page,
         }
-        if location:
-            params["location"] = location
         try:
             data = get_json(SEARCH_URL, params=params, headers=headers)
         except Exception as exc:

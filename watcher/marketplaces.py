@@ -85,8 +85,11 @@ def get(key: str) -> Optional[Marketplace]:
 def _blocket_fetch(
     phrase: str, *, search: Search, config: MarketplaceConfig, settings: Settings
 ) -> List[Listing]:
-    location = search.location if search.scope == "local" else ""
-    return blocket_source.fetch(phrase, location=location, max_pages=settings.max_pages_per_query)
+    # Blocket's search API has no working location/region filter (see
+    # blocket_source.fetch's docstring, backlog #26) - a "local" scope
+    # search's location is applied client-side instead, after fetching (see
+    # pipeline._filter_by_scope).
+    return blocket_source.fetch(phrase, max_pages=settings.max_pages_per_query)
 
 
 def _blocket_enrich_description(url: str) -> str:

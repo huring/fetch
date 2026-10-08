@@ -4,6 +4,14 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-08
+- **Fixed every Blocket search for a "local" scope failing outright** (was
+  backlog #26) - confirmed live that Blocket's own search API returns a 400
+  for *any* request carrying a `location` parameter (tried as a plain county
+  name, a numeric code, and lowercased - all rejected, even paired with an
+  otherwise-working query). Since a local-scope search's location match was
+  already being re-applied client-side after fetching anyway, the fix is to
+  just stop sending that parameter to Blocket at all, rather than try to
+  reverse-engineer whatever shape it actually wants.
 - **Per-search manual trigger** (was backlog #1) - "Run now" moved from each
   marketplace (which ran every search attached to it) to each search
   instead, covering just that search across whichever marketplaces it's
