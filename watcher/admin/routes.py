@@ -53,7 +53,8 @@ def _search_to_form(search: Optional[Search]) -> dict:
     if search is None:
         return dict(
             name="", enabled=True, scope="local", location="", require_shipping=False, max_price="",
-            min_price="", excluded_models="", excluded_words="", required_keywords="",
+            min_price="", scoring_mode="plain", instant_alert_price="",
+            excluded_models="", excluded_words="", required_keywords="",
             hard_criteria="", soft_criteria="", watched_models="",
             search_phrases="", marketplaces=[],
         )
@@ -65,6 +66,8 @@ def _search_to_form(search: Optional[Search]) -> dict:
         require_shipping=search.require_shipping,
         max_price=search.max_price if search.max_price is not None else "",
         min_price=search.min_price if search.min_price is not None else "",
+        scoring_mode=search.scoring_mode,
+        instant_alert_price=search.instant_alert_price if search.instant_alert_price is not None else "",
         excluded_models=_list_to_lines(search.excluded_models),
         excluded_words=_list_to_lines(search.excluded_words),
         required_keywords=_list_to_lines(search.required_keywords),
@@ -79,6 +82,8 @@ def _search_to_form(search: Optional[Search]) -> dict:
 def _form_to_search(form_data) -> Search:
     max_price = form_data.get("max_price", "")
     min_price = form_data.get("min_price", "")
+    instant_alert_price = form_data.get("instant_alert_price", "")
+    scoring_mode = "rated" if form_data.get("scoring_mode") == "rated" else "plain"
     marketplaces = [key for key in form_data.getlist("marketplaces") if key in MARKETPLACES]
     return Search(
         name=form_data.get("name", ""),
@@ -88,6 +93,8 @@ def _form_to_search(form_data) -> Search:
         require_shipping=form_data.get("require_shipping") is not None,
         max_price=int(max_price) if max_price.strip() else None,
         min_price=int(min_price) if min_price.strip() else None,
+        scoring_mode=scoring_mode,
+        instant_alert_price=int(instant_alert_price) if instant_alert_price.strip() else None,
         excluded_models=_lines_to_list(form_data.get("excluded_models", "")),
         excluded_words=_lines_to_list(form_data.get("excluded_words", "")),
         required_keywords=_lines_to_list(form_data.get("required_keywords", "")),

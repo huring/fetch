@@ -6,7 +6,7 @@
 <table>
     <thead>
         <tr>
-            <th>Name</th><th>Scope</th><th>Location</th><th>Status</th>
+            <th>Name</th><th>Scope</th><th>Location</th><th>Status</th><th>Mode</th>
             <th>Found</th><th>Summary</th><th>Above threshold</th><th></th>
         </tr>
     </thead>
@@ -18,9 +18,15 @@
             <td>{{ s.scope }}{% if s.require_shipping %} <span class="muted">(shipping required)</span>{% endif %}</td>
             <td>{{ s.location or "-" }}</td>
             <td><span class="pill {{ 'on' if s.enabled else 'off' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span></td>
+            <td>{{ "AI-rated" if s.scoring_mode == "rated" else "Plain" }}</td>
             <td><a href="/searches/{{ s.id }}/listings?bucket=found">{{ c.get('found', 0) }}</a></td>
+            {% if s.scoring_mode == "rated" %}
             <td><a href="/searches/{{ s.id }}/listings?bucket=summary">{{ c.get('summary', 0) }}</a></td>
             <td><a href="/searches/{{ s.id }}/listings?bucket=threshold">{{ c.get('threshold', 0) }}</a></td>
+            {% else %}
+            <td class="muted">-</td>
+            <td class="muted">-</td>
+            {% endif %}
             <td>
                 <form class="inline" method="post" action="/searches/{{ s.id }}/toggle">
                     <button class="secondary" type="submit">{{ 'Disable' if s.enabled else 'Enable' }}</button>
@@ -31,7 +37,7 @@
             </td>
         </tr>
     {% else %}
-        <tr><td colspan="8" class="muted">No searches yet.</td></tr>
+        <tr><td colspan="9" class="muted">No searches yet.</td></tr>
     {% endfor %}
     </tbody>
 </table>

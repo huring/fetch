@@ -63,6 +63,26 @@ def _filter_by_scope(listings: List[Listing], search: Search) -> List[Listing]:
     return [l for l in listings if l.location is None or loc in l.location.lower()]
 
 
+def _maybe_send_plain_instant_alert(
+    conn: sqlite3.Connection, settings: Settings, search: Search, row: sqlite3.Row, dry_run: bool
+) -> None:
+    if search.instant_alert_price is None:
+        return
+    if row["price"] is None or row["price"] > search.instant_alert_price:
+        return
+    if not settings.slack_webhook_url:
+        logger.warning("SLACK_WEBHOOK_URL not configured, skipping plain price alert for %r", row["title"])
+        return
+    try:
+        slack.send_plain_instant(
+            settings.slack_webhook_url, search.name, row["title"], row["price"], row["url"], dry_run=dry_run,
+        )
+        if not dry_run:
+            storage.mark_notified_instant(conn, row["id"])
+    except Exception as exc:
+        logger.error("Failed to send plain price alert: %s", exc)
+
+
 def run_marketplace_cycle(
     conn: sqlite3.Connection, settings: Settings, marketplace_key: str, dry_run: bool = False
 ) -> Dict[str, Any]:
@@ -125,6 +145,13 @@ def run_marketplace_cycle(
                         if not ok:
                             storage.mark_prefiltered_out(conn, row["id"], reason)
                             continue
+
+                # A "rated" listing is simply left pending (score IS NULL) for
+                # the next scoring submit sweep; a "plain" one has no Claude
+                # step at all, so it's surfaced immediately.
+                if search.scoring_mode == "plain":
+                    storage.mark_surfaced_plain(conn, row["id"])
+                    _maybe_send_plain_instant_alert(conn, settings, search, row, dry_run)
 
                 total_pending += 1
 
@@ -365,22 +392,27 @@ def run_once(conn: sqlite3.Connection, client: Anthropic, settings: Settings, dr
 
 def send_digest(conn: sqlite3.Connection, settings: Settings, dry_run: bool = False) -> Dict[str, Any]:
     rows = storage.get_pending_digest(conn, settings.score_digest_min, settings.score_instant_threshold - 1)
+    plain_rows = storage.get_pending_plain_digest(conn)
 
     grouped: Dict[str, List[slack.DigestEntry]] = {}
+    plain_grouped: Dict[str, List[slack.PlainDigestEntry]] = {}
     ids: List[int] = []
     for row in rows:
         grouped.setdefault(row["search_name"], []).append(
             (row["title"], row["price"], row["url"], row["score"], row["reasoning"])
         )
         ids.append(row["id"])
+    for row in plain_rows:
+        plain_grouped.setdefault(row["search_name"], []).append((row["title"], row["price"], row["url"]))
+        ids.append(row["id"])
 
-    if grouped:
+    if grouped or plain_grouped:
         if settings.slack_webhook_url:
-            slack.send_digest(settings.slack_webhook_url, grouped, dry_run=dry_run)
+            slack.send_digest(settings.slack_webhook_url, grouped, plain_grouped, dry_run=dry_run)
         else:
             logger.warning("SLACK_WEBHOOK_URL not configured, skipping digest with %d entries", len(ids))
 
     if not dry_run:
         storage.mark_digested(conn, ids)
 
-    return {"entries": len(ids), "searches": len(grouped)}
+    return {"entries": len(ids), "searches": len(grouped) + len(plain_grouped)}

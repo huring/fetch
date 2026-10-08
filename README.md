@@ -84,15 +84,30 @@ input/output tokens and dollar cost, logged per completed scoring batch.
 
 Everything you watch for is a **search**: a name, a scope (local/national + a
 location), whether shipping should be required, a deterministic prefilter
-(min/max price / excluded models / excluded words / required keywords), free-text
-hard and soft criteria for Claude's judgment, watched models (wildcard pattern
-+ note + rough good price, optionally flagged as a buy-it-now/ideal target -
-see below), and a shared list of search phrases - all stored
-once on the search itself, not duplicated per marketplace. A search also
-picks which registered marketplace(s) it runs on; each
-marketplace decides how to use the search's phrases and other settings (e.g.
-Blocket uses the phrase as its "q" param and the location for local-scope
-searches) rather than storing its own copy of them.
+(min/max price / excluded models / excluded words / required keywords), and a
+shared list of search phrases - all stored once on the search itself, not
+duplicated per marketplace. A search also picks which registered
+marketplace(s) it runs on; each marketplace decides how to use the search's
+phrases and other settings (e.g. Blocket uses the phrase as its "q" param and
+the location for local-scope searches) rather than storing its own copy of
+them.
+
+Every search is either **plain** or **AI-rated** (the "AI-rated" toggle on the
+search form; new searches default to plain):
+
+- **Plain** - no Claude call at all. A listing that passes the deterministic
+  prefilter is just surfaced: browsable in the admin UI and included in the
+  daily digest with its title/price/link, no score or reasoning. Set
+  `instant_alert_price` to also get pinged on Slack the moment a match turns
+  up at or below that price, instead of waiting for the digest. Good for "I
+  know exactly what I want and roughly what it should cost" searches (e.g. a
+  specific record you're hunting for).
+- **AI-rated** - today's full pipeline: free-text hard and soft criteria,
+  watched models (wildcard pattern + note + rough good price, optionally
+  flagged as a buy-it-now/ideal target - see below), and Claude scoring each
+  match 1-10 with reasoning, via the Batch API (see "Keeping Claude spend low"
+  below). Good for "I'm not sure exactly what I want, judge it for me"
+  searches.
 
 Searches live in the same SQLite database as everything else and are managed
 entirely through the admin UI at `http://<host>:8000/searches` - there are no
@@ -124,7 +139,9 @@ target's good-price range sits above what you'd otherwise cap a search at,
 or it'll get silently filtered out before Claude ever sees it.
 
 The search list shows three counts per search, each a link to the actual
-listings behind it (so you can check what's there without going via Slack):
+listings behind it (so you can check what's there without going via Slack).
+A plain search only ever populates **Found** - **Summary**/**Above
+threshold** are shown as "-" since there's no Claude score to bucket by:
 
 - **Found** - listings that passed the deterministic prefilter (within the
   max-price/excluded-model rules), regardless of Claude's score.

@@ -25,6 +25,7 @@ def _default_searches():
         Search(
             name="Living room - AV receiver",
             scope="national",
+            scoring_mode="rated",
             max_price=3000,
             hard_criteria=[
                 "AV receiver with 4K/HDCP 2.2 passthrough required (HDMI 2.0 is enough, HDMI 2.1 is not required)",
@@ -46,6 +47,7 @@ def _default_searches():
         Search(
             name="Living room - subwoofer",
             scope="national",
+            scoring_mode="rated",
             max_price=5000,
             hard_criteria=["Standalone active subwoofer, max ~37cm (370mm) wide"],
             soft_criteria=["Other 12-inch subs within the width limit are also interesting, not just the watched models"],
@@ -61,6 +63,7 @@ def _default_searches():
         Search(
             name="Living room - front speakers",
             scope="national",
+            scoring_mode="rated",
             hard_criteria=[
                 "Must replace Jamo E470 - needs to be a clear step up in sound quality, otherwise not interesting",
                 "Black finish strongly preferred",
@@ -100,6 +103,7 @@ def _default_searches():
         Search(
             name="Living room - center speaker",
             scope="national",
+            scoring_mode="rated",
             soft_criteria=[
                 "Low priority - current Proson Reality center (exact model unknown) is acceptable but could be upgraded",
                 "A center from the same series/brand as the new front speakers scores higher (tonal matching)",
@@ -111,6 +115,7 @@ def _default_searches():
         Search(
             name="Living room - rear speakers",
             scope="national",
+            scoring_mode="rated",
             enabled=False,
             soft_criteria=["Not actively watched - only score 8+ for a major upgrade in a discreet/compact format"],
             search_phrases=["bakhögtalare surround"],
@@ -119,6 +124,7 @@ def _default_searches():
         Search(
             name="Stugan hifi",
             scope="national",
+            scoring_mode="rated",
             hard_criteria=[
                 "Max 2.1 configuration - no large receivers, space is limited",
                 "Aesthetics are important",

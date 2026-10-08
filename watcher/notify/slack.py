@@ -57,23 +57,50 @@ def send_instant(
 
 
 DigestEntry = Tuple[str, Optional[int], str, int, str]  # title, price, url, score, reasoning
+PlainDigestEntry = Tuple[str, Optional[int], str]  # title, price, url - a "plain" (no-AI) search's match
 
 
-def format_digest(entries_by_search: Dict[str, List[DigestEntry]]) -> str:
+def format_digest(
+    entries_by_search: Dict[str, List[DigestEntry]],
+    plain_entries_by_search: Optional[Dict[str, List[PlainDigestEntry]]] = None,
+) -> str:
     lines = [":clipboard: *Daily digest*"]
     for search_name, entries in entries_by_search.items():
         lines.append(f"\n*{search_name}*")
         for title, price, url, score, reasoning in entries:
             lines.append(f"- *<{url}|{title}>* ({score}/10, {_price_str(price)}) - {reasoning}")
+    for search_name, entries in (plain_entries_by_search or {}).items():
+        lines.append(f"\n*{search_name}*")
+        for title, price, url in entries:
+            lines.append(f"- *<{url}|{title}>* - {_price_str(price)}")
     return "\n".join(lines)
 
 
-def send_digest(webhook_url: str, entries_by_search: Dict[str, List[DigestEntry]], dry_run: bool = False) -> None:
-    if not entries_by_search:
+def send_digest(
+    webhook_url: str,
+    entries_by_search: Dict[str, List[DigestEntry]],
+    plain_entries_by_search: Optional[Dict[str, List[PlainDigestEntry]]] = None,
+    dry_run: bool = False,
+) -> None:
+    if not entries_by_search and not plain_entries_by_search:
         return
-    text = format_digest(entries_by_search)
+    text = format_digest(entries_by_search, plain_entries_by_search)
     if dry_run:
         logger.info("[dry-run] would send Slack digest:\n%s", text)
+        return
+    _post(webhook_url, text)
+
+
+def format_plain_instant(search_name: str, title: str, price: Optional[int], url: str) -> str:
+    return f":moneybag: *Price alert* - {search_name}\n*<{url}|{title}>* - {_price_str(price)}"
+
+
+def send_plain_instant(
+    webhook_url: str, search_name: str, title: str, price: Optional[int], url: str, dry_run: bool = False
+) -> None:
+    text = format_plain_instant(search_name, title, price, url)
+    if dry_run:
+        logger.info("[dry-run] would send plain Slack price alert:\n%s", text)
         return
     _post(webhook_url, text)
 

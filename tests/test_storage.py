@@ -243,3 +243,28 @@ def test_get_listing_with_search_name(conn, search_id):
     listing_id = storage.upsert_listing(conn, search_id, make_listing())
     row = storage.get_listing_with_search_name(conn, listing_id)
     assert row["search_name"] == "Test search"
+
+
+def test_mark_surfaced_plain_is_distinct_from_pending_and_prefiltered(conn, search_id):
+    listing_id = storage.upsert_listing(conn, search_id, make_listing())
+    storage.mark_surfaced_plain(conn, listing_id)
+
+    row = conn.execute("SELECT score FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    assert row["score"] == storage.PLAIN_SURFACED_SCORE
+    assert storage.get_pending_listings(conn, search_id) == []  # no longer pending
+
+
+def test_get_pending_plain_digest_excludes_notified_and_already_digested(conn, search_id):
+    pending = storage.upsert_listing(conn, search_id, make_listing(external_id="pending"))
+    notified = storage.upsert_listing(conn, search_id, make_listing(external_id="notified"))
+    digested = storage.upsert_listing(conn, search_id, make_listing(external_id="digested"))
+    not_surfaced = storage.upsert_listing(conn, search_id, make_listing(external_id="still-pending"))
+
+    for listing_id in (pending, notified, digested):
+        storage.mark_surfaced_plain(conn, listing_id)
+    storage.mark_notified_instant(conn, notified)
+    storage.mark_digested(conn, [digested])
+
+    rows = storage.get_pending_plain_digest(conn)
+    assert {row["id"] for row in rows} == {pending}
+    assert rows[0]["search_name"] == "Test search"

@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS searches (
     require_shipping INTEGER NOT NULL DEFAULT 0,
     max_price INTEGER,
     min_price INTEGER,
+    scoring_mode TEXT NOT NULL DEFAULT 'rated',
+    instant_alert_price INTEGER,
     excluded_models TEXT NOT NULL DEFAULT '[]',
     excluded_words TEXT NOT NULL DEFAULT '[]',
     required_keywords TEXT NOT NULL DEFAULT '[]',
@@ -249,6 +251,24 @@ def _migrate_add_min_price(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_add_scoring_mode(conn: sqlite3.Connection) -> None:
+    """Adds the scoring_mode/instant_alert_price columns to a searches table
+    created before "plain" (no-AI) searches existed. scoring_mode backfills
+    to 'rated' (not the Search model's own 'plain' default) so every
+    already-configured search - which relied on Claude scoring before this
+    column existed - keeps doing exactly that; only a freshly created search
+    defaults to 'plain'. No-op on a fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "searches" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(searches)")}
+    if "scoring_mode" not in columns:
+        conn.execute("ALTER TABLE searches ADD COLUMN scoring_mode TEXT NOT NULL DEFAULT 'rated'")
+    if "instant_alert_price" not in columns:
+        conn.execute("ALTER TABLE searches ADD COLUMN instant_alert_price INTEGER")
+    conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -260,6 +280,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_marketplace_queries_to_search_phrases(conn)
     _migrate_add_stale_notified_at(conn)
     _migrate_add_min_price(conn)
+    _migrate_add_scoring_mode(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

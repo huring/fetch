@@ -23,6 +23,14 @@
         <label>Min price (SEK) <span class="hint">(deterministic filter - screens out suspiciously-cheap listings, e.g. a lone accessory rather than the item itself; leave blank for no floor)</span>
             <input type="number" name="min_price" value="{{ form.min_price }}">
         </label>
+        <label><input type="checkbox" id="scoring_mode_rated" name="scoring_mode" value="rated" {{ "checked" if form.scoring_mode == "rated" else "" }} style="width:auto;display:inline;"> AI-rated <span class="hint">(off: a plain browsable list with no Claude involved, just the filters below - on: Claude also scores and reasons about every match using the criteria further down)</span></label>
+    </fieldset>
+
+    <fieldset id="plain-fields">
+        <legend>Plain search alerting</legend>
+        <label>Instant alert price (SEK) <span class="hint">(a match at or below this price pings Slack immediately instead of waiting for the daily digest; leave blank to only ever appear in the digest)</span>
+            <input type="number" name="instant_alert_price" value="{{ form.instant_alert_price }}">
+        </label>
     </fieldset>
 
     <fieldset>
@@ -38,7 +46,7 @@
         </label>
     </fieldset>
 
-    <fieldset>
+    <fieldset id="rated-fields">
         <legend>Criteria for Claude's scoring</legend>
         <label>Hard requirements <span class="hint">(one per line, free text, e.g. "HDCP 2.2 passthrough required")</span>
             <textarea name="hard_criteria">{{ form.hard_criteria }}</textarea>
@@ -72,4 +80,22 @@
         <a class="button secondary" href="/searches">Cancel</a>
     </div>
 </form>
+<script>
+    // Progressive enhancement only - the "rated" vs "plain" fieldsets are both
+    // submitted either way, so nothing breaks if this doesn't run.
+    (function () {
+        var ratedCheckbox = document.getElementById("scoring_mode_rated");
+        var ratedFields = document.getElementById("rated-fields");
+        var plainFields = document.getElementById("plain-fields");
+
+        function sync() {
+            var isRated = ratedCheckbox.checked;
+            ratedFields.style.display = isRated ? "" : "none";
+            plainFields.style.display = isRated ? "none" : "";
+        }
+
+        ratedCheckbox.addEventListener("change", sync);
+        sync();
+    })();
+</script>
 {% endblock %}

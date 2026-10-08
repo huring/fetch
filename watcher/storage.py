@@ -3,11 +3,15 @@
 Score convention on the ``listings`` table:
   * NULL -> pending, still needs to go through prefilter + Claude scoring.
   * 0    -> deterministically excluded by the prefilter (never sent to Claude).
-  * 1-10 -> Claude's assessment.
+  * 1-10 -> Claude's assessment (only for a "rated" search).
+  * -1   -> passed the deterministic prefilter for a "plain" (no-AI) search -
+            see PLAIN_SURFACED_SCORE. Never sent to Claude at all.
 
 A listing that drops in price is reset back to NULL (pending) so it goes
 through prefilter + scoring + notification again, per the dedupe rule that a
-price drop counts as a "new" sighting.
+price drop counts as a "new" sighting - this applies equally to plain-mode
+listings, which get a fresh chance to pass the prefilter and clear
+instant_alert_price.
 """
 from __future__ import annotations
 
@@ -206,6 +210,19 @@ def mark_prefiltered_out(conn: sqlite3.Connection, listing_id: int, reason: str)
     conn.commit()
 
 
+PLAIN_SURFACED_SCORE = -1
+
+
+def mark_surfaced_plain(conn: sqlite3.Connection, listing_id: int) -> None:
+    """A "plain" (no-AI) search's listing passed the deterministic prefilter -
+    there's no Claude call to wait for, so it's immediately surfaced."""
+    conn.execute(
+        "UPDATE listings SET score = ? WHERE id = ?",
+        (PLAIN_SURFACED_SCORE, listing_id),
+    )
+    conn.commit()
+
+
 def mark_scored(
     conn: sqlite3.Connection,
     listing_id: int,
@@ -244,6 +261,24 @@ def get_pending_digest(conn: sqlite3.Connection, score_min: int, score_max: int)
         ORDER BY searches.name, listings.score DESC
         """,
         (score_min, score_max),
+    ).fetchall()
+
+
+def get_pending_plain_digest(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """Plain-mode listings (surfaced by the deterministic prefilter, no
+    Claude involved) not yet shown via an instant price alert or an earlier
+    digest - the plain-search counterpart to get_pending_digest."""
+    return conn.execute(
+        """
+        SELECT listings.*, searches.name AS search_name
+        FROM listings
+        JOIN searches ON searches.id = listings.search_id
+        WHERE listings.score = ?
+          AND listings.included_in_digest_at IS NULL
+          AND listings.notified_instant_at IS NULL
+        ORDER BY searches.name, listings.price ASC
+        """,
+        (PLAIN_SURFACED_SCORE,),
     ).fetchall()
 
 

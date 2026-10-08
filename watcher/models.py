@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 Scope = Literal["local", "national"]
+ScoringMode = Literal["plain", "rated"]
 
 
 class WatchedModel(BaseModel):
@@ -30,6 +31,18 @@ class Search(BaseModel):
     require_shipping: bool = False
     max_price: Optional[int] = None
     min_price: Optional[int] = None
+    # "plain": deterministic prefilter only, no Claude call - just a browsable
+    # list plus an optional instant_alert_price threshold. "rated": today's
+    # full pipeline (hard/soft criteria, watched_models, Claude scoring).
+    # New searches default to "plain" (the admin UI's new-search form starts
+    # with the AI-rating toggle off); existing rows are backfilled to "rated"
+    # by the db migration so already-configured searches keep scoring exactly
+    # as before.
+    scoring_mode: ScoringMode = "plain"
+    # Plain-mode only: a listing at or below this price triggers an instant
+    # Slack alert instead of waiting for the daily digest. None means every
+    # match just waits for the digest.
+    instant_alert_price: Optional[int] = None
     excluded_models: List[str] = Field(default_factory=list)
     excluded_words: List[str] = Field(default_factory=list)
     required_keywords: List[str] = Field(default_factory=list)

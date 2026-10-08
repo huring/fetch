@@ -45,6 +45,44 @@ def test_send_digest_skips_when_empty():
 
 
 @responses.activate
+def test_send_digest_includes_plain_entries_without_a_score():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    plain_entries = {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/4")]}
+    slack.send_digest(WEBHOOK, {}, plain_entries)
+
+    body = responses.calls[0].request.body.decode()
+    assert "Vinyl hunt" in body
+    assert "Kind of Blue (LP)" in body
+    assert "/10" not in body  # no score for a plain entry
+
+
+def test_send_digest_sends_when_only_plain_entries_present():
+    with responses.RequestsMock() as rsps:
+        rsps.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+        slack.send_digest(WEBHOOK, {}, {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/4")]})
+        assert len(rsps.calls) == 1
+
+
+@responses.activate
+def test_send_plain_instant_posts_formatted_text():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+
+    slack.send_plain_instant(WEBHOOK, "Vinyl hunt", "Kind of Blue (LP)", 250, "https://x/4")
+
+    body = responses.calls[0].request.body.decode()
+    assert "Kind of Blue (LP)" in body
+    assert "Price alert" in body
+    assert "Vinyl hunt" in body
+
+
+def test_send_plain_instant_dry_run_does_not_post():
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        slack.send_plain_instant(WEBHOOK, "Vinyl hunt", "Kind of Blue (LP)", 250, "https://x/4", dry_run=True)
+        assert len(rsps.calls) == 0
+
+
+@responses.activate
 def test_send_health_alert():
     responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
 

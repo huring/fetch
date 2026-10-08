@@ -173,6 +173,67 @@ def test_min_price_round_trips_through_form(client):
     assert 'name="min_price" value="2000"' in edit_html
 
 
+def test_new_search_form_defaults_to_plain_scoring_mode(client):
+    edit_html = client.get("/searches/new").text
+    assert 'name="scoring_mode" value="rated"' in edit_html
+    assert 'checked' not in edit_html.split('name="scoring_mode"')[1].split('>')[0]
+
+
+def test_scoring_mode_round_trips_through_form(client):
+    response = client.post(
+        "/searches/new",
+        data={
+            "name": "Vinyl hunt",
+            "enabled": "on",
+            "scope": "national",
+            "location": "",
+            "max_price": "",
+            "scoring_mode": "rated",
+            "search_phrases": "kind of blue",
+            "marketplaces": "blocket",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    from watcher import searches as searches_repo
+
+    conn = client.app.state.conn
+    search = next(s for s in searches_repo.list_searches(conn) if s.name == "Vinyl hunt")
+    assert search.scoring_mode == "rated"
+
+    edit_html = client.get(f"/searches/{search.id}/edit").text
+    assert 'name="scoring_mode" value="rated" checked' in edit_html
+
+
+def test_plain_search_with_instant_alert_price_round_trips_through_form(client):
+    response = client.post(
+        "/searches/new",
+        data={
+            "name": "Vinyl hunt plain",
+            "enabled": "on",
+            "scope": "national",
+            "location": "",
+            "max_price": "",
+            "instant_alert_price": "300",
+            "search_phrases": "kind of blue",
+            "marketplaces": "blocket",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    from watcher import searches as searches_repo
+
+    conn = client.app.state.conn
+    search = next(s for s in searches_repo.list_searches(conn) if s.name == "Vinyl hunt plain")
+    assert search.scoring_mode == "plain"
+    assert search.instant_alert_price == 300
+
+    edit_html = client.get(f"/searches/{search.id}/edit").text
+    assert 'name="instant_alert_price" value="300"' in edit_html
+
+
 def test_watched_model_ideal_flag_round_trips_through_form(client):
     response = client.post(
         "/searches/new",

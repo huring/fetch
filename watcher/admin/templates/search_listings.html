@@ -5,14 +5,14 @@
 <p class="actions"><a class="button secondary" href="/searches">&larr; Back to searches</a></p>
 <table>
     <thead>
-        <tr><th>Title</th><th>Price</th><th>Score</th><th>Source</th><th>Active for</th><th></th></tr>
+        <tr><th>Title</th><th>Price</th>{% if search.scoring_mode == "rated" %}<th>Score</th>{% endif %}<th>Source</th><th>Active for</th><th></th></tr>
     </thead>
     <tbody>
     {% for l in listings %}
         <tr>
             <td><a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.title }}</a></td>
             <td>{{ l.price if l.price is not none else "-" }}</td>
-            <td>{{ l.score if l.score is not none else "-" }}</td>
+            {% if search.scoring_mode == "rated" %}<td>{{ l.score if l.score is not none else "-" }}</td>{% endif %}
             <td>{{ l.source }}</td>
             <td>{{ l.age_days ~ " days" if l.age_days is not none else "-" }}</td>
             <td>{% if l.stale_notified_at %}<span class="pill off">possible offer</span>{% endif %}</td>
