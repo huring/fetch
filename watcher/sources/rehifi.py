@@ -154,7 +154,13 @@ def _parse_product_page(html: str, url: str) -> Optional[Listing]:
 
 
 def fetch(phrase: str) -> List[Listing]:
-    words = [w for w in phrase.lower().split() if w]
+    # Slugs separate model numbers with hyphens (e.g. "accuphase-a-46"), so a
+    # phrase word is compared against the slug with hyphens normalized to
+    # spaces on BOTH sides - otherwise a hyphenated phrase word like "a-46"
+    # can never match, since the slug's own hyphen was replaced with a space
+    # but the phrase word's wasn't. This previously made every search phrase
+    # with a hyphenated model number (most hifi gear) match nothing at all.
+    words = [w for w in phrase.lower().replace("-", " ").split() if w]
     if not words:
         return []
 

@@ -93,6 +93,29 @@ def test_fetch_skips_out_of_stock_products():
     listings = rehifi.fetch("aad c-401i")
 
     assert listings == []
+    # The empty result above must come from the in-stock check, not from the
+    # slug match itself silently failing to find the product at all.
+    assert responses.calls[-1].request.url == "https://www.rehifi.se/product/aad-c-401i"
+
+
+@responses.activate
+def test_fetch_matches_hyphenated_model_number_in_phrase():
+    """Regression test: a product's slug already hyphenates its model number
+    (e.g. "aad-c-401i"), and a search phrase naturally written the same way
+    (e.g. "aad c-401i") must still match it - the hyphen in the phrase word
+    and the hyphen in the slug need to normalize to the same thing."""
+    _mock_catalog()
+    responses.add(
+        responses.GET,
+        "https://www.rehifi.se/product/aad-c-401i",
+        body=_product_html("AAD C-401i", "1500", "45084"),
+        status=200,
+    )
+
+    listings = rehifi.fetch("aad c-401i")
+
+    assert len(listings) == 1
+    assert listings[0].title == "AAD C-401i"
 
 
 @responses.activate
