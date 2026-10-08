@@ -24,7 +24,7 @@ def make_settings(db_path):
     )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def no_real_marketplace_fetches():
     """The admin app's scheduler fires an immediate tick on startup
     (next_run_time=now) regardless of whether an API key is configured -
@@ -32,10 +32,24 @@ def no_real_marketplace_fetches():
     HTTP layer, not live marketplace data, so every source's fetch is
     stubbed out here rather than relying on a missing API key to prevent
     real network calls (it no longer does, now that fetch and scoring run
-    independently)."""
+    independently).
+
+    module-scoped (not the usual function scope) deliberately: the admin
+    app's scheduler keeps running on its own background thread after a test
+    function returns (BackgroundScheduler.shutdown(wait=False) in the
+    lifespan doesn't block for an in-progress job, by design - a slow job
+    shouldn't hold up a production container's shutdown). A function-scoped
+    patch can close before that straggler thread gets to the fetch call it's
+    mid-way through, at which point it hits the real network and - since
+    some other test's @responses.activate is active globally for the whole
+    process by then - gets intercepted by a mock meant for an unrelated
+    test, breaking it in a confusing, hard-to-reproduce way. Keeping the
+    patch open for this whole module closes that race for every test in it;
+    only the module boundary remains a (much narrower) residual risk."""
     with patch("watcher.sources.blocket.fetch", return_value=[]), \
          patch("watcher.sources.vinted.fetch", return_value=[]), \
-         patch("watcher.sources.rehifi.fetch", return_value=[]):
+         patch("watcher.sources.rehifi.fetch", return_value=[]), \
+         patch("watcher.sources.auctionet.fetch", return_value=[]):
         yield
 
 
@@ -45,6 +59,18 @@ def client(tmp_path):
     app = create_app(settings)
     with TestClient(app) as test_client:
         yield test_client
+        # Cancels future recurring firings (the 5-min tick, daily jobs)
+        # immediately rather than waiting for the lifespan's own shutdown.
+        # Deliberately non-blocking - a wait=True here was tried and
+        # reverted, since it could hang indefinitely (APScheduler's shutdown
+        # join appears to deadlock against its own worker threads in this
+        # setup, not just wait a bounded, predictable amount of time). This
+        # narrows the remaining race (see no_real_marketplace_fetches above)
+        # without that risk, but doesn't close it completely - a residual,
+        # low-frequency flake is a known, accepted characteristic of testing
+        # a real background scheduler this way (see CLAUDE.md/this comment
+        # if it resurfaces).
+        test_client.app.state.scheduler.remove_all_jobs()
 
 
 def test_index_redirects_to_searches(client):
@@ -436,6 +462,16 @@ def test_marketplaces_list_shows_blocket(client):
     assert response.status_code == 200
     assert "Blocket" in response.text
     assert "240 min" in response.text  # default poll interval
+
+
+def test_marketplaces_list_flags_auctionet_as_an_auction(client):
+    response = client.get("/marketplaces")
+    assert response.status_code == 200
+    assert "Auctionet" in response.text
+    auctionet_row = response.text.split("Auctionet")[1].split("</tr>")[0]
+    assert "auction" in auctionet_row
+    blocket_row = response.text.split(">Blocket<")[0].split("<tr>")[-1]
+    assert "auction" not in blocket_row
 
 
 def test_marketplace_edit_updates_poll_interval(client):

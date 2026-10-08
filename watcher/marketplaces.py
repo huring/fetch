@@ -20,6 +20,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from watcher.models import Listing, MarketplaceConfig, Search
 from watcher.settings import Settings
+from watcher.sources import auctionet as auctionet_source
 from watcher.sources import blocket as blocket_source
 from watcher.sources import rehifi as rehifi_source
 from watcher.sources import vinted as vinted_source
@@ -58,6 +59,14 @@ class Marketplace:
     # rarely mix listings from more than one marketplace (a straggler still
     # pending from a previous cycle).
     scoring_note: Optional[str] = None
+    # True for a live-auction marketplace (current bid rises toward a
+    # deadline) rather than a fixed-price classifieds marketplace. Changes
+    # three things: `price` means "current bid requirement" rather than an
+    # asking price (see models.Listing.auction_ends_at), a listing's removal
+    # is detected from auction_ends_at passing rather than check_active
+    # re-fetching the page (see liveness.run_auction_end_sweep), and its
+    # candidates carry auction_ends_at into Claude's scoring prompt.
+    is_auction: bool = False
 
 
 MARKETPLACES: Dict[str, "Marketplace"] = {}
@@ -165,6 +174,38 @@ register(
             "every purchase includes 3 months warranty, a 30-day exchange right, and a 10-day right of "
             "return. Treat that warranty coverage as a genuine advantage over private-seller marketplaces "
             "with no such protection, and factor it into your price assessment and score."
+        ),
+    )
+)
+
+
+# --- Auctionet (auction) ------------------------------------------------------
+
+def _auctionet_fetch(
+    phrase: str, *, search: Search, config: MarketplaceConfig, settings: Settings
+) -> List[Listing]:
+    # Auctionet has no location/city filter in its search API - like Vinted,
+    # search.location/scope aren't used.
+    return auctionet_source.fetch(phrase, max_pages=settings.max_pages_per_query)
+
+
+register(
+    Marketplace(
+        key="auctionet",
+        display_name="Auctionet",
+        fetch=_auctionet_fetch,
+        auth_fields=(),
+        default_poll_interval_minutes=240,
+        default_request_delay_seconds=2.0,
+        is_auction=True,
+        scoring_note=(
+            "This listing is a LIVE AUCTION on Auctionet (a Swedish auction-house aggregator), not a "
+            "fixed-price classified ad - 'price' is the current bid requirement (what a new bidder would "
+            "need to bid right now to lead), not a seller's asking price, and it will typically rise "
+            "further before the auction ends. Judge the price against what a fair final price would "
+            "likely be, not just the current bid, and mention the auction's remaining time (given below) "
+            "in your reasoning since it's decision-relevant - a 'good price' today may not hold once "
+            "bidding continues."
         ),
     )
 )

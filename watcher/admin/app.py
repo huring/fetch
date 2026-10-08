@@ -25,7 +25,7 @@ from fastapi import FastAPI
 from watcher import db
 from watcher import marketplace_configs as marketplace_configs_repo
 from watcher.admin.routes import router
-from watcher.liveness import run_liveness_sweep
+from watcher.liveness import run_auction_end_sweep, run_liveness_sweep
 from watcher.marketplaces import MARKETPLACES
 from watcher.pipeline import collect_finished_batches, run_marketplace_cycle, send_digest, submit_pending_scoring
 from watcher.price_watch import check_item, run_price_watch_sweep
@@ -94,6 +94,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     except Exception:
                         logger.exception("Marketplace cycle failed for %s", key)
 
+                try:
+                    auction_sweep_result = run_auction_end_sweep(scheduler_conn, dry_run=settings.dry_run)
+                    if auction_sweep_result["removed"] > 0:
+                        logger.info("Auction-end sweep complete: %s", auction_sweep_result)
+                except Exception:
+                    logger.exception("Auction-end sweep failed")
+
                 if client is None:
                     logger.error("ANTHROPIC_API_KEY not configured, skipping scoring submit/collect")
                     return
@@ -145,6 +152,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     logger.exception("Manually-triggered marketplace run failed for %s", key)
                     return
 
+                try:
+                    auction_sweep_result = run_auction_end_sweep(scheduler_conn, dry_run=settings.dry_run)
+                    if auction_sweep_result["removed"] > 0:
+                        logger.info("Auction-end sweep complete: %s", auction_sweep_result)
+                except Exception:
+                    logger.exception("Auction-end sweep failed")
+
                 if client is None:
                     logger.error("ANTHROPIC_API_KEY not configured, cannot submit/collect scoring")
                     return
@@ -192,7 +206,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         yield
 
-        scheduler.shutdown(wait=False)
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
         conn.close()
         scheduler_conn.close()
 

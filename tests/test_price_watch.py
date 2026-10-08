@@ -203,7 +203,7 @@ def test_check_item_with_find_used_creates_linked_plain_search():
     assert linked.scoring_mode == "plain"
     assert linked.search_phrases == ["VU Meter Pro"]
     assert linked.instant_alert_price == 1000
-    assert set(linked.marketplaces) == {"blocket", "vinted", "rehifi"}
+    assert set(linked.marketplaces) == {"blocket", "vinted", "rehifi", "auctionet"}
 
 
 def test_check_item_without_find_used_does_not_create_linked_search():

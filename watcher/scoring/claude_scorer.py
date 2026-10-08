@@ -101,6 +101,8 @@ def _build_user_text(candidates: List[Dict[str, Any]]) -> str:
     listings_block = []
     for idx, c in enumerate(candidates):
         block = f"[{idx}] title: {c['title']}\nprice: {c['price']}\ndescription: {c['description']}\nurl: {c['url']}"
+        if c.get("auction_ends_at"):
+            block += f"\nauction ends at: {c['auction_ends_at']}"
         if c.get("source_note"):
             block += f"\nnote: {c['source_note']}"
         listings_block.append(block)

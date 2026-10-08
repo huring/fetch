@@ -5,6 +5,7 @@ everything else above the lower score threshold, grouped by search.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -25,6 +26,26 @@ def _post(webhook_url: str, text: str) -> None:
 
 def _price_str(price: Optional[int]) -> str:
     return f"{price} SEK" if price is not None else "unknown price"
+
+
+def _auction_suffix(auction_ends_at: Optional[str]) -> str:
+    """A plain-mode listing/digest entry has no Claude reasoning text to
+    mention an auction's deadline in (unlike a rated listing - see
+    claude_scorer._build_user_text/marketplaces.Marketplace.is_auction's
+    scoring_note, which asks Claude to mention it itself), so this is
+    appended algorithmically instead, from the same auction_ends_at the
+    rated path feeds to Claude."""
+    if not auction_ends_at:
+        return ""
+    ends_at = datetime.datetime.strptime(auction_ends_at, "%Y-%m-%d %H:%M:%S")
+    remaining = ends_at - datetime.datetime.utcnow()
+    if remaining <= datetime.timedelta(0):
+        return " (auction ended)"
+    if remaining < datetime.timedelta(hours=1):
+        return f" (auction ends in {int(remaining.total_seconds() // 60)} min)"
+    if remaining < datetime.timedelta(days=1):
+        return f" (auction ends in {int(remaining.total_seconds() // 3600)}h)"
+    return f" (auction ends in {remaining.days}d)"
 
 
 def format_instant(
@@ -57,7 +78,10 @@ def send_instant(
 
 
 DigestEntry = Tuple[str, Optional[int], str, int, str]  # title, price, url, score, reasoning
-PlainDigestEntry = Tuple[str, Optional[int], str]  # title, price, url - a "plain" (no-AI) search's match
+# title, price, url, auction_ends_at - a "plain" (no-AI) search's match. The
+# rated path doesn't need this in its own tuple shape - Claude is asked to
+# mention an auction's deadline in its own reasoning text instead.
+PlainDigestEntry = Tuple[str, Optional[int], str, Optional[str]]
 
 
 def format_digest(
@@ -71,8 +95,8 @@ def format_digest(
             lines.append(f"- *<{url}|{title}>* ({score}/10, {_price_str(price)}) - {reasoning}")
     for search_name, entries in (plain_entries_by_search or {}).items():
         lines.append(f"\n*{search_name}*")
-        for title, price, url in entries:
-            lines.append(f"- *<{url}|{title}>* - {_price_str(price)}")
+        for title, price, url, auction_ends_at in entries:
+            lines.append(f"- *<{url}|{title}>* - {_price_str(price)}{_auction_suffix(auction_ends_at)}")
     return "\n".join(lines)
 
 
@@ -91,14 +115,25 @@ def send_digest(
     _post(webhook_url, text)
 
 
-def format_plain_instant(search_name: str, title: str, price: Optional[int], url: str) -> str:
-    return f":moneybag: *Price alert* - {search_name}\n*<{url}|{title}>* - {_price_str(price)}"
+def format_plain_instant(
+    search_name: str, title: str, price: Optional[int], url: str, auction_ends_at: Optional[str] = None
+) -> str:
+    return (
+        f":moneybag: *Price alert* - {search_name}\n"
+        f"*<{url}|{title}>* - {_price_str(price)}{_auction_suffix(auction_ends_at)}"
+    )
 
 
 def send_plain_instant(
-    webhook_url: str, search_name: str, title: str, price: Optional[int], url: str, dry_run: bool = False
+    webhook_url: str,
+    search_name: str,
+    title: str,
+    price: Optional[int],
+    url: str,
+    auction_ends_at: Optional[str] = None,
+    dry_run: bool = False,
 ) -> None:
-    text = format_plain_instant(search_name, title, price, url)
+    text = format_plain_instant(search_name, title, price, url, auction_ends_at)
     if dry_run:
         logger.info("[dry-run] would send plain Slack price alert:\n%s", text)
         return

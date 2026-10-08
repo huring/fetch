@@ -47,7 +47,13 @@ def test_fetch_stops_on_empty_page():
     listings = blocket.fetch("nonexistent")
 
     assert listings == []
-    assert len(responses.calls) == 1
+    # Filtered to this call's own q= rather than asserting len(responses.calls)
+    # == 1 outright - a background thread from an unrelated admin-route test
+    # can occasionally still be mid-fetch when this test starts (see
+    # test_admin_routes.py's no_real_marketplace_fetches), which would
+    # otherwise show up as an extra, unrelated call here.
+    matching_calls = [c for c in responses.calls if "q=nonexistent" in c.request.url]
+    assert len(matching_calls) == 1
 
 
 @responses.activate

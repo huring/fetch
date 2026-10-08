@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS listings (
     notified_instant_at TEXT,
     included_in_digest_at TEXT,
     stale_notified_at TEXT,
+    auction_ends_at TEXT,
     raw_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(search_id, source, external_id)
 );
@@ -287,6 +288,19 @@ def _migrate_add_scoring_mode(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_add_auction_ends_at(conn: sqlite3.Connection) -> None:
+    """Adds the auction_ends_at column (an auction marketplace's hard
+    deadline, see models.Listing) to a listings table created before auction
+    marketplaces existed. No-op on a fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "listings" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(listings)")}
+    if "auction_ends_at" not in columns:
+        conn.execute("ALTER TABLE listings ADD COLUMN auction_ends_at TEXT")
+        conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -299,6 +313,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_stale_notified_at(conn)
     _migrate_add_min_price(conn)
     _migrate_add_scoring_mode(conn)
+    _migrate_add_auction_ends_at(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

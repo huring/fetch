@@ -44,6 +44,22 @@ def make_listing(external_id, title="Onkyo TX-NR656", price=1000, source="blocke
     )
 
 
+def make_auction_listing(external_id, auction_ends_at, price=1000):
+    return Listing(
+        source="auctionet",
+        external_id=external_id,
+        title="Lot",
+        description="",
+        price=price,
+        url=f"https://auctionet.com/{external_id}",
+        location=None,
+        ships=None,
+        published_at=None,
+        auction_ends_at=auction_ends_at,
+        raw={},
+    )
+
+
 def _backdate_first_seen(conn, listing_id, days):
     then = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("UPDATE listings SET first_seen_at = ? WHERE id = ?", (then, listing_id))
@@ -150,6 +166,65 @@ def test_sweep_dry_run_does_not_delete_or_mark(tmp_path):
 
     with patch("watcher.sources.blocket.check_active", return_value=False):
         result = liveness.run_liveness_sweep(conn, make_settings(dry_run=True), dry_run=True)
+
+    assert result["removed"] == 1
+    assert conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone() is not None
+    assert conn.execute("SELECT * FROM price_history").fetchone() is None
+
+
+def test_auction_end_sweep_removes_ended_auctions_regardless_of_score_state(tmp_path):
+    conn = make_conn(tmp_path)
+    search = searches.create_search(
+        conn, Search(name="C", search_phrases=["x"], marketplaces=["auctionet"])
+    )
+    past = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+    ended_pending_id = storage.upsert_listing(conn, search.id, make_auction_listing("ended-pending", past))
+    ended_scored_id = storage.upsert_listing(conn, search.id, make_auction_listing("ended-scored", past))
+    storage.mark_scored(conn, ended_scored_id, 7, "good", [], "fair")
+
+    result = liveness.run_auction_end_sweep(conn)
+
+    assert result["removed"] == 2
+    assert conn.execute("SELECT * FROM listings WHERE id = ?", (ended_pending_id,)).fetchone() is None
+    assert conn.execute("SELECT * FROM listings WHERE id = ?", (ended_scored_id,)).fetchone() is None
+    history_names = {row["title"] for row in conn.execute("SELECT * FROM price_history")}
+    assert history_names == {"Lot"}
+
+
+def test_auction_end_sweep_leaves_still_live_auction_untouched(tmp_path):
+    conn = make_conn(tmp_path)
+    search = searches.create_search(
+        conn, Search(name="C", search_phrases=["x"], marketplaces=["auctionet"])
+    )
+    future = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+    listing_id = storage.upsert_listing(conn, search.id, make_auction_listing("still-live", future))
+
+    result = liveness.run_auction_end_sweep(conn)
+
+    assert result["removed"] == 0
+    assert conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone() is not None
+
+
+def test_auction_end_sweep_ignores_non_auction_listings(tmp_path):
+    conn = make_conn(tmp_path)
+    search = searches.create_search(conn, Search(name="C", search_phrases=["x"], marketplaces=["blocket"]))
+    listing_id = storage.upsert_listing(conn, search.id, make_listing("1"))
+
+    result = liveness.run_auction_end_sweep(conn)
+
+    assert result["removed"] == 0
+    assert conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone() is not None
+
+
+def test_auction_end_sweep_dry_run_does_not_delete(tmp_path):
+    conn = make_conn(tmp_path)
+    search = searches.create_search(
+        conn, Search(name="C", search_phrases=["x"], marketplaces=["auctionet"])
+    )
+    past = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+    listing_id = storage.upsert_listing(conn, search.id, make_auction_listing("ended", past))
+
+    result = liveness.run_auction_end_sweep(conn, dry_run=True)
 
     assert result["removed"] == 1
     assert conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone() is not None

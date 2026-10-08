@@ -38,6 +38,25 @@ def _age_days(first_seen_at: str, now: datetime.datetime) -> int:
     return (now - first_seen).days
 
 
+def run_auction_end_sweep(conn: sqlite3.Connection, dry_run: bool = False) -> Dict[str, Any]:
+    """Removes every listing whose auction has ended (see
+    models.Listing.auction_ends_at / marketplaces.Marketplace.is_auction).
+
+    Unlike run_liveness_sweep, this needs no network call and no
+    `check_active` hook at all - an auction's own deadline, captured at fetch
+    time, is itself the removal signal once it's passed. Covers every active
+    listing regardless of score state (pending/rated/plain), not just
+    Claude-scored ones, so it's cheap enough to run on every scheduler tick
+    rather than waiting for the once-daily liveness job."""
+    removed = 0
+    for row in storage.get_ended_auction_listings(conn):
+        if not dry_run:
+            storage.insert_price_history(conn, row["search_name"], row)
+            storage.delete_listing(conn, row["id"])
+        removed += 1
+    return {"removed": removed}
+
+
 def run_liveness_sweep(conn: sqlite3.Connection, settings: Settings, dry_run: bool = False) -> Dict[str, Any]:
     now = datetime.datetime.utcnow()
     checked = 0

@@ -14,7 +14,7 @@
         <tbody class="divide-y divide-gray-800">
         {% for m in marketplaces %}
             <tr>
-                <td class="px-3 py-2">{{ m.display_name }}</td>
+                <td class="px-3 py-2">{{ m.display_name }}{% if m.is_auction %} <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-900 text-indigo-300">auction</span>{% endif %}</td>
                 <td class="px-3 py-2">{{ m.poll_interval_minutes }} min</td>
                 <td class="px-3 py-2">{{ m.request_delay_seconds }}s</td>
                 <td class="px-3 py-2">

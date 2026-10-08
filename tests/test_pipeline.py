@@ -101,6 +101,7 @@ def make_listing(external_id, title, price=1000, description=""):
         location="Stockholm",
         ships=None,
         published_at=None,
+        auction_ends_at=None,
         raw={},
     )
 

@@ -316,6 +316,32 @@ def test_list_feed_listings_filters_by_bucket_and_search(conn, search_id):
     assert {row["id"] for row in only_alerts} == {alert_a}
 
 
+def test_get_ended_auction_listings(conn, search_id):
+    from watcher.models import Listing
+
+    def make_auction_listing(external_id, auction_ends_at):
+        return Listing(
+            source="auctionet", external_id=external_id, title="Lot", description="",
+            price=1000, url=f"https://auctionet.com/{external_id}", location=None, ships=None,
+            published_at=None, auction_ends_at=auction_ends_at, raw={},
+        )
+
+    import datetime
+    past = datetime.datetime.utcnow() - datetime.timedelta(days=1)
+    future = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+
+    ended_id = storage.upsert_listing(conn, search_id, make_auction_listing("ended", past))
+    still_live_id = storage.upsert_listing(conn, search_id, make_auction_listing("live", future))
+    non_auction_id = storage.upsert_listing(conn, search_id, make_listing(external_id="non-auction"))
+
+    ended = storage.get_ended_auction_listings(conn)
+
+    assert {row["id"] for row in ended} == {ended_id}
+    assert ended[0]["search_name"] == "Test search"
+    assert still_live_id not in {row["id"] for row in ended}
+    assert non_auction_id not in {row["id"] for row in ended}
+
+
 def test_get_listing_with_search_name(conn, search_id):
     listing_id = storage.upsert_listing(conn, search_id, make_listing())
     row = storage.get_listing_with_search_name(conn, listing_id)

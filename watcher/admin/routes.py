@@ -348,6 +348,7 @@ def list_marketplaces(request: Request, ran: Optional[str] = None):
                 "request_delay_seconds": config.request_delay_seconds if config else marketplace.default_request_delay_seconds,
                 "has_auth_fields": bool(marketplace.auth_fields),
                 "auth_configured": bool(config and config.auth),
+                "is_auction": marketplace.is_auction,
             }
         )
     return templates.TemplateResponse(request, "marketplaces_list.html", {"marketplaces": rows, "ran": ran})

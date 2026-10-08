@@ -38,6 +38,20 @@ def test_build_batch_request_includes_source_note_per_candidate():
     assert user_text.count("note:") == 1
 
 
+def test_build_batch_request_includes_auction_ends_at_per_candidate():
+    search = Search(name="Test")
+    candidates = [
+        {"title": "A", "description": "", "price": 1500, "url": "u", "auction_ends_at": "2026-10-25 12:00:00"},
+        {"title": "B", "description": "", "price": 200, "url": "u2"},
+    ]
+
+    request = build_batch_request("custom-1", "claude-haiku-4-5", search, candidates)
+
+    user_text = request["params"]["messages"][0]["content"]
+    assert "auction ends at: 2026-10-25 12:00:00" in user_text
+    assert user_text.count("auction ends at:") == 1
+
+
 def test_build_batch_request_separates_ideal_from_other_watched_models():
     search = Search(
         name="GPU hunt",

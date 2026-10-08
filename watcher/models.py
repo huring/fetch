@@ -74,10 +74,10 @@ class WatchedItem(BaseModel):
     enabled: bool = True
     target_price: Optional[int] = None
     check_frequency: CheckFrequency = "daily"
-    # Also look for a used version of this exact item on the existing
-    # marketplaces (Blocket/Vinted/Rehifi), alerting if one turns up at or
-    # below target_price - see watched_items.py/price_watch.py for how the
-    # linked plain search this spins up is created and kept in sync.
+    # Also look for a used version of this exact item on every registered
+    # marketplace, alerting if one turns up at or below target_price - see
+    # watched_items.py/price_watch.py for how the linked plain search this
+    # spins up is created and kept in sync.
     find_used: bool = False
     linked_search_id: Optional[int] = None
     # Everything below is check-run state, not admin-edited - see
@@ -111,6 +111,11 @@ class Listing:
     location: Optional[str]
     ships: Optional[bool]
     published_at: Optional[datetime]
+    # Set only by an auction marketplace (Marketplace.is_auction) - the
+    # auction's hard deadline. Everything else about an auction listing
+    # reuses the fields above as-is: `price` means "current bid requirement"
+    # rather than a fixed asking price for these, not a separate concept.
+    auction_ends_at: Optional[datetime] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 

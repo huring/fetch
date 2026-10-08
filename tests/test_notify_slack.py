@@ -48,7 +48,7 @@ def test_send_digest_skips_when_empty():
 def test_send_digest_includes_plain_entries_without_a_score():
     responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
 
-    plain_entries = {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/4")]}
+    plain_entries = {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/4", None)]}
     slack.send_digest(WEBHOOK, {}, plain_entries)
 
     body = responses.calls[0].request.body.decode()
@@ -60,7 +60,7 @@ def test_send_digest_includes_plain_entries_without_a_score():
 def test_send_digest_sends_when_only_plain_entries_present():
     with responses.RequestsMock() as rsps:
         rsps.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
-        slack.send_digest(WEBHOOK, {}, {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/4")]})
+        slack.send_digest(WEBHOOK, {}, {"Vinyl hunt": [("Kind of Blue (LP)", 250, "https://x/4", None)]})
         assert len(rsps.calls) == 1
 
 
@@ -74,6 +74,56 @@ def test_send_plain_instant_posts_formatted_text():
     assert "Kind of Blue (LP)" in body
     assert "Price alert" in body
     assert "Vinyl hunt" in body
+
+
+def test_auction_suffix_none_when_no_ends_at():
+    assert slack._auction_suffix(None) == ""
+
+
+def test_auction_suffix_ended_when_in_the_past():
+    import datetime
+    past = (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    assert slack._auction_suffix(past) == " (auction ended)"
+
+
+def test_auction_suffix_days_when_far_in_the_future():
+    # A small buffer keeps this away from the floor-rounding edge - formatting
+    # to second precision and the brief delay before _auction_suffix's own
+    # utcnow() call both shave a little off the raw delta.
+    import datetime
+    future = (datetime.datetime.utcnow() + datetime.timedelta(days=3, minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    assert slack._auction_suffix(future) == " (auction ends in 3d)"
+
+
+def test_auction_suffix_hours_when_under_a_day():
+    import datetime
+    future = (datetime.datetime.utcnow() + datetime.timedelta(hours=5, minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+    assert slack._auction_suffix(future) == " (auction ends in 5h)"
+
+
+@responses.activate
+def test_send_plain_instant_includes_auction_suffix():
+    import datetime
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+    future = (datetime.datetime.utcnow() + datetime.timedelta(days=2, minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
+    slack.send_plain_instant(WEBHOOK, "Auction hunt", "Tandberg Receiver", 1500, "https://x/6", auction_ends_at=future)
+
+    body = responses.calls[0].request.body.decode()
+    assert "auction ends in 2d" in body
+
+
+@responses.activate
+def test_format_digest_plain_entry_includes_auction_suffix():
+    import datetime
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+    future = (datetime.datetime.utcnow() + datetime.timedelta(days=1, hours=1, minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+
+    plain_entries = {"Auction hunt": [("Tandberg Receiver", 1500, "https://x/6", future)]}
+    slack.send_digest(WEBHOOK, {}, plain_entries)
+
+    body = responses.calls[0].request.body.decode()
+    assert "auction ends in 1d" in body
 
 
 def test_send_plain_instant_dry_run_does_not_post():

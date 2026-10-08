@@ -75,7 +75,8 @@ def _maybe_send_plain_instant_alert(
         return
     try:
         slack.send_plain_instant(
-            settings.slack_webhook_url, search.name, row["title"], row["price"], row["url"], dry_run=dry_run,
+            settings.slack_webhook_url, search.name, row["title"], row["price"], row["url"],
+            auction_ends_at=row["auction_ends_at"], dry_run=dry_run,
         )
         if not dry_run:
             storage.mark_notified_instant(conn, row["id"])
@@ -222,6 +223,7 @@ def submit_pending_scoring(conn: sqlite3.Connection, client: Anthropic, settings
                     "description": r["description"],
                     "price": r["price"],
                     "url": r["url"],
+                    "auction_ends_at": r["auction_ends_at"],
                     "source_note": getattr(get_marketplace(r["source"]), "scoring_note", None),
                 }
                 for r in chunk
@@ -403,7 +405,9 @@ def send_digest(conn: sqlite3.Connection, settings: Settings, dry_run: bool = Fa
         )
         ids.append(row["id"])
     for row in plain_rows:
-        plain_grouped.setdefault(row["search_name"], []).append((row["title"], row["price"], row["url"]))
+        plain_grouped.setdefault(row["search_name"], []).append(
+            (row["title"], row["price"], row["url"], row["auction_ends_at"])
+        )
         ids.append(row["id"])
 
     if grouped or plain_grouped:

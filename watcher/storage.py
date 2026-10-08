@@ -15,6 +15,7 @@ instant_alert_price.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -23,19 +24,24 @@ from typing import Dict, List, Optional
 from watcher.models import Listing
 
 
+def _format_dt(dt: Optional[datetime.datetime]) -> Optional[str]:
+    return dt.strftime("%Y-%m-%d %H:%M:%S") if dt is not None else None
+
+
 def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -> int:
     row = conn.execute(
         "SELECT id, price, lowest_price FROM listings WHERE search_id = ? AND source = ? AND external_id = ?",
         (search_id, listing.source, listing.external_id),
     ).fetchone()
+    auction_ends_at = _format_dt(listing.auction_ends_at)
 
     if row is None:
         cursor = conn.execute(
             """
             INSERT INTO listings (
                 search_id, source, external_id, title, description, url,
-                price, lowest_price, location, ships, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                price, lowest_price, location, ships, auction_ends_at, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 search_id,
@@ -48,6 +54,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 listing.price,
                 listing.location,
                 None if listing.ships is None else int(listing.ships),
+                auction_ends_at,
                 json.dumps(listing.raw),
             ),
         )
@@ -67,7 +74,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             UPDATE listings SET
                 title = ?, description = ?, url = ?, price = ?, lowest_price = ?,
-                location = ?, ships = ?, raw_json = ?, last_seen_at = datetime('now'),
+                location = ?, ships = ?, auction_ends_at = ?, raw_json = ?, last_seen_at = datetime('now'),
                 score = NULL, reasoning = NULL, uncertain_specs = '[]', price_assessment = NULL,
                 notified_instant_at = NULL, included_in_digest_at = NULL
             WHERE id = ?
@@ -80,6 +87,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 new_lowest,
                 listing.location,
                 None if listing.ships is None else int(listing.ships),
+                auction_ends_at,
                 json.dumps(listing.raw),
                 listing_id,
             ),
@@ -89,7 +97,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             UPDATE listings SET
                 title = ?, description = ?, url = ?, price = ?,
-                location = ?, ships = ?, raw_json = ?, last_seen_at = datetime('now')
+                location = ?, ships = ?, auction_ends_at = ?, raw_json = ?, last_seen_at = datetime('now')
             WHERE id = ?
             """,
             (
@@ -99,6 +107,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 listing.price,
                 listing.location,
                 None if listing.ships is None else int(listing.ships),
+                auction_ends_at,
                 json.dumps(listing.raw),
                 listing_id,
             ),
@@ -422,6 +431,24 @@ def get_scored_listings(conn: sqlite3.Connection) -> List[sqlite3.Row]:
         FROM listings
         JOIN searches ON searches.id = listings.search_id
         WHERE listings.score BETWEEN 1 AND 10
+        """
+    ).fetchall()
+
+
+def get_ended_auction_listings(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    """Every active listing (regardless of score state - pending/rated/plain)
+    whose auction has ended. Unlike get_scored_listings (what the network-
+    based liveness sweep checks), this needs no network call at all: an
+    auction's own auction_ends_at, captured the moment it was first fetched,
+    is itself the removal signal once it's passed - see
+    watcher/liveness.py's run_auction_end_sweep."""
+    return conn.execute(
+        """
+        SELECT listings.*, searches.name AS search_name
+        FROM listings
+        JOIN searches ON searches.id = listings.search_id
+        WHERE listings.auction_ends_at IS NOT NULL
+          AND listings.auction_ends_at <= datetime('now')
         """
     ).fetchall()
 

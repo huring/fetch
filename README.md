@@ -3,11 +3,11 @@
 Watches secondhand marketplaces for listings matching configurable "searches"
 (hifi gear, a pickup truck, bookshelves - anything), scores candidates
 against your criteria with Claude, and notifies you on Slack: instantly for
-standout finds, once a day for everything else. Blocket, Vinted and Rehifi
-are currently registered; more can be added without touching the pipeline,
-admin routes, or templates (see "Marketplaces" below). Tradera support
-existed early on and was removed rather than left half-wired - it'll come
-back as a proper marketplace if/when it's needed.
+standout finds, once a day for everything else. Blocket, Vinted, Rehifi and
+Auctionet are currently registered; more can be added without touching the
+pipeline, admin routes, or templates (see "Marketplaces" below). Tradera
+support existed early on and was removed rather than left half-wired - it'll
+come back as a proper marketplace if/when it's needed.
 
 ## How it works
 
@@ -207,6 +207,31 @@ marketplace settings aren't touched) - handy after a change to what gets
 fetched or how it's scored, to confirm the new behavior from scratch rather
 than mixed in with old results.
 
+### Auction marketplaces
+
+A marketplace can also be flagged `is_auction=True` (Auctionet is the first
+and currently only one) - a live, ascending-bid auction site rather than a
+fixed-price classifieds site. Three things work differently for these,
+without needing a separate adapter type:
+
+- `price` means the current bid requirement (what a new bidder would need
+  to bid right now to lead), not a seller's asking price - it's expected to
+  rise before the auction ends.
+- Removal is detected from the listing's own `auction_ends_at` deadline
+  passing, not by re-fetching the page - cheaper than the normal liveness
+  sweep, and it runs on every scheduler tick rather than waiting for the
+  once-daily one.
+- Claude is told (via the normal per-marketplace `scoring_note` mechanism)
+  that a listing is a live auction and given its deadline, so it can factor
+  in urgency; a plain-mode auction listing gets the same "ends in Xd/Xh"
+  text appended to its Slack message algorithmically instead, since there's
+  no Claude reasoning text to carry it there.
+
+This deliberately doesn't re-score a listing as its price climbs toward (or
+past) what looked like a good deal at discovery - it's scored once, near its
+opening bid, and the live bid/deadline shown in Slack is what surfaces that
+staleness to you rather than hiding it.
+
 ## Watched items
 
 A **watched item** (`http://<host>:8000/watched-items`) is a different thing
@@ -228,9 +253,9 @@ daily is just the default, not a requirement). A **Check now** button on the
 list page triggers an out-of-cycle check the same way a marketplace's **Run
 now** does.
 
-**Find this item used**, if checked, also searches the existing marketplaces
-(Blocket/Vinted/Rehifi) for a used copy once the product's title is known
-from the first check - it does this by automatically creating a normal
+**Find this item used**, if checked, also searches every registered
+marketplace for a used copy once the product's title is known from the
+first check - it does this by automatically creating a normal
 "plain" search (see "Searches and the admin UI" above) with that title as its
 one search phrase and the watched item's own target price as its instant
 alert price, so a used (or new, elsewhere) copy at a good price alerts
@@ -367,6 +392,15 @@ docker run --rm -v watcher_data:/data -v "$PWD":/backup alpine \
   category) rather than 404ing like a removed Blocket/Vinted listing - so its
   liveness is read from the JSON-LD offer's `availability` field
   (`InStock`/`OutOfStock`), not from the page merely existing.
+- **Auctionet** (auctionet.com) aggregates live auctions run by many
+  independent Swedish auction houses. Unlike Blocket/Vinted/Rehifi, this is a
+  genuine public, unauthenticated JSON API - `GET /api/v2/items` - the same
+  endpoint the site's own search page calls (confirmed live, 2026-10);
+  robots.txt only disallows `/admin/` and `/*/my`, nothing about search or
+  this endpoint. It returns full title/description/condition text already,
+  no separate detail-page fetch needed (unlike Blocket/Vinted). See "Auction
+  marketplaces" above for how `is_auction=True` changes price/removal/
+  scoring semantics for it.
 
 ## Local development
 
