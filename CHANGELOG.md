@@ -4,6 +4,27 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Watched items: keep the price even when out of stock, and show a
+  distinct "blocked" badge for sites that actively reject scraping** - found
+  while debugging two live reports. First: a watched item showed its new
+  confirmation card (title/image/description) but no current price, because
+  the page's own data said it was genuinely out of stock
+  (`availability: OutOfStock` in its schema.org JSON-LD) - the code was
+  clearing the price in that case, which isn't actually wanted (the price is
+  still useful to know), and looked identical in the UI to an item that had
+  never been checked at all either way. Now the price is always recorded
+  regardless of stock status - only the instant-alert check itself requires
+  both a good price *and* the item being purchasable - and a new `in_stock`
+  field (always the latest check's own finding) lets the list and
+  confirmation card show "(out of stock)" explicitly. Second: another item
+  showed nothing at all, because that retailer (a Shopify storefront)
+  returns a persistent HTTP 429 on every product page - confirmed live, not
+  a transient rate limit. A watched item's last HTTP failure status is now
+  tracked separately, surfacing an immediate "blocked (HTTP 429)" badge
+  distinct from the generic "unreachable" one (which only appears after
+  `HEALTH_ALERT_AFTER_N_FAILURES` in a row) - there's no fix for a site that
+  deliberately blocks automated requests, but it's now clear that's what's
+  happening instead of looking like a bug.
 - **Fixed test_admin_routes.py's full suite silently taking minutes longer
   than it reports** (was backlog #27) - confirmed live in CI: a run that
   prints "263 passed in ~18s" was actually taking ~8 minutes to finish.

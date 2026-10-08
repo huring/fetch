@@ -277,6 +277,25 @@ check is reading the item you meant (the image is never downloaded or
 stored - just linked to by its original URL, taken from the same JSON-LD
 block, or the page's OpenGraph `og:image` tag if there's no JSON-LD).
 
+An item's price is recorded and shown even while it's out of stock (still
+useful to know what it's priced at) - only the instant-alert check itself
+requires both a price at/below target *and* the item actually being
+purchasable right now. A blank "-" specifically means no check has
+succeeded yet at all, shown distinctly from "(out of stock)" next to a last
+known price, or on its own if no price has ever been found. Stock status
+comes from the page's own schema.org JSON-LD `availability` where present,
+or Claude's own judgment of the rendered page otherwise.
+
+Some retailers push back on automated requests outright rather than just
+being slow or down - confirmed live (2026-10) on a Shopify storefront that
+returns a persistent HTTP 429 on every product page. A watched item whose
+last check failed with HTTP 403 or 429 shows an immediate "blocked (HTTP
+429)"-style badge (distinct from the generic "unreachable" one, which only
+appears after `HEALTH_ALERT_AFTER_N_FAILURES` in a row) - there's no clean
+fix for an actively-blocking site beyond a paid proxy or a specialized
+price-tracking API, but at least it's clear that's what's happening rather
+than looking like a bug.
+
 Fields: a name, the URL, an optional **target price** (alert on Slack the
 moment the price is at or below it - once alerted, it won't repeat daily at
 the same or a higher price, only on a further drop), and a **check

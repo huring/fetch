@@ -122,6 +122,20 @@ def test_record_check_result_stores_and_keeps_description_and_image(conn):
     assert item.extracted_image_url == "https://example.com/vu.jpg"
 
 
+def test_record_check_result_in_stock_is_not_coalesced(conn):
+    # Unlike description/image/currency, in_stock must always reflect the
+    # latest check - a stale "in stock" from last time would hide a
+    # genuine "now out of stock" from the admin UI.
+    created = watched_items.create_watched_item(conn, make_item())
+    watched_items.record_check_result(conn, created.id, price=900, extracted_title="VU Meter Pro", in_stock=True)
+    assert watched_items.get_watched_item(conn, created.id).in_stock is True
+
+    watched_items.record_check_result(conn, created.id, price=None, extracted_title="VU Meter Pro", in_stock=False)
+    item = watched_items.get_watched_item(conn, created.id)
+    assert item.in_stock is False
+    assert item.current_price is None
+
+
 def test_record_check_failure_increments_and_is_reset_by_success(conn):
     created = watched_items.create_watched_item(conn, make_item())
 
@@ -134,6 +148,22 @@ def test_record_check_failure_increments_and_is_reset_by_success(conn):
     item = watched_items.get_watched_item(conn, created.id)
     assert item.consecutive_check_failures == 0
     assert item.dead_alert_sent is False
+
+
+def test_record_check_failure_stores_and_resets_last_error_status(conn):
+    created = watched_items.create_watched_item(conn, make_item())
+
+    watched_items.record_check_failure(conn, created.id, status_code=429)
+    assert watched_items.get_watched_item(conn, created.id).last_error_status == 429
+
+    # A later failure with no HTTP status (e.g. a timeout) overwrites, not
+    # accumulates - it reflects only the most recent failure's own nature.
+    watched_items.record_check_failure(conn, created.id)
+    assert watched_items.get_watched_item(conn, created.id).last_error_status is None
+
+    watched_items.record_check_failure(conn, created.id, status_code=403)
+    watched_items.record_check_result(conn, created.id, price=900, extracted_title="VU Meter Pro")
+    assert watched_items.get_watched_item(conn, created.id).last_error_status is None
 
 
 def test_mark_dead_alert_sent(conn):

@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import requests
 import responses
 
 from watcher import db, price_watch, searches, watched_items
@@ -227,7 +228,9 @@ def test_check_item_alerts_again_on_a_further_price_drop():
     assert send.call_count == 2
 
 
-def test_check_item_out_of_stock_clears_price_and_does_not_alert():
+def test_check_item_out_of_stock_still_records_price_but_does_not_alert():
+    # Knowing the price of something out of stock is still useful - only
+    # alerting is gated on in_stock, not whether the price gets recorded.
     conn = make_conn()
     item = make_item(conn, target_price=1000)
     client = make_client(price=900, in_stock=False)
@@ -238,7 +241,22 @@ def test_check_item_out_of_stock_clears_price_and_does_not_alert():
 
     send.assert_not_called()
     assert result["alerted"] is False
-    assert watched_items.get_watched_item(conn, item.id).current_price is None
+    updated = watched_items.get_watched_item(conn, item.id)
+    assert updated.current_price == 900
+    assert updated.in_stock is False
+
+
+@responses.activate
+def test_check_item_records_in_stock_true_on_success():
+    responses.add(responses.POST, WEBHOOK, json={"ok": True}, status=200)
+    conn = make_conn()
+    item = make_item(conn)
+    client = make_client(price=900, in_stock=True)
+
+    with patch("watcher.price_watch.get_text", return_value=HTML):
+        price_watch.check_item(conn, client, make_settings(), item)
+
+    assert watched_items.get_watched_item(conn, item.id).in_stock is True
 
 
 def test_check_item_fetch_failure_is_handled_gracefully():
@@ -250,6 +268,19 @@ def test_check_item_fetch_failure_is_handled_gracefully():
 
     assert result == {"checked": False, "alerted": False}
     assert watched_items.get_watched_item(conn, item.id).consecutive_check_failures == 1
+
+
+def test_check_item_records_blocked_status_from_an_http_error():
+    conn = make_conn()
+    item = make_item(conn)
+    response = SimpleNamespace(status_code=429)
+    error = requests.HTTPError("429 Client Error: Too Many Requests")
+    error.response = response
+
+    with patch("watcher.price_watch.get_text", side_effect=error):
+        price_watch.check_item(conn, make_client(), make_settings(), item)
+
+    assert watched_items.get_watched_item(conn, item.id).last_error_status == 429
 
 
 def test_check_item_fetch_failure_sends_dead_alert_after_threshold():

@@ -17,13 +17,19 @@
         {% for i in items %}
             <tr>
                 <td class="px-3 py-2"><a href="/watched-items/{{ i.id }}/edit" class="text-indigo-300 hover:text-indigo-200">{{ i.name }}</a> <a class="text-gray-400 hover:text-gray-200" href="{{ i.url }}" target="_blank" rel="noopener">&#8599;</a></td>
-                <td class="px-3 py-2">{{ i.current_price if i.current_price is not none else "-" }}{{ " " ~ i.currency if i.current_price is not none and i.currency else "" }}</td>
+                <td class="px-3 py-2">
+                    {% if i.current_price is not none %}{{ i.current_price }}{{ " " ~ i.currency if i.currency else "" }}{% if i.in_stock == false %} <span class="text-gray-500">(out of stock)</span>{% endif %}
+                    {% elif i.in_stock == false %}<span class="text-gray-500">out of stock</span>
+                    {% else %}-{% endif %}
+                </td>
                 <td class="px-3 py-2">{{ i.target_price if i.target_price is not none else "-" }}</td>
                 <td class="px-3 py-2">{{ i.lowest_price_seen if i.lowest_price_seen is not none else "-" }}</td>
                 <td class="px-3 py-2">{{ i.check_frequency }}</td>
                 <td class="px-3 py-2">{{ "yes" if i.find_used else "-" }}</td>
                 <td class="px-3 py-2">
                     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {{ 'bg-green-900 text-green-300' if i.enabled else 'bg-gray-700 text-gray-400' }}">{{ 'enabled' if i.enabled else 'disabled' }}</span>
+                    {% if i.last_error_status in (403, 429) %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-900 text-amber-200" title="Last check got HTTP {{ i.last_error_status }} - this site is likely rate-limiting or blocking automated requests, not just down">blocked (HTTP {{ i.last_error_status }})</span>
+                    {% elif i.last_error_status %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-900 text-amber-200" title="Last check failed with this HTTP status">error (HTTP {{ i.last_error_status }})</span>{% endif %}
                     {% if i.dead_alert_sent %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-red-900 text-red-200" title="{{ i.consecutive_check_failures }} failed checks in a row">unreachable</span>{% endif %}
                 </td>
                 <td class="px-3 py-2">{{ i.last_checked_at or "never" }}</td>

@@ -105,6 +105,14 @@ class WatchedItem(BaseModel):
     # not an assumption baked into the check logic itself).
     currency: Optional[str] = None
     current_price: Optional[int] = None
+    # Distinguishes "genuinely out of stock as of the last successful check"
+    # (current_price is None *because* of this) from "never successfully
+    # checked yet" (current_price is also None, but this stays None too) -
+    # without it the admin UI can't tell the two apart, and a confirmed
+    # out-of-stock item just looks identical to a broken one. Always the
+    # latest check's finding (unlike extracted_title/description/image_url/
+    # currency, stock status isn't something to keep stale on purpose).
+    in_stock: Optional[bool] = None
     lowest_price_seen: Optional[int] = None
     last_alert_price: Optional[int] = None
     last_checked_at: Optional[str] = None
@@ -114,6 +122,15 @@ class WatchedItem(BaseModel):
     # the page) counts as a failure; a successful check resets both to zero.
     consecutive_check_failures: int = 0
     dead_alert_sent: bool = False
+    # The most recent failed check's HTTP status code, if it failed with
+    # one (None for a non-HTTP failure like a timeout/DNS error, and reset
+    # to None the moment a check succeeds again). Surfaced as a distinct
+    # "blocked" badge for 403/429 specifically - many sites (confirmed live
+    # on a Shopify storefront, 2026-10) actively rate-limit/block automated
+    # requests rather than just being slow or down, and that's worth a
+    # different signal than the generic "unreachable" one, which only shows
+    # after HEALTH_ALERT_AFTER_N_FAILURES anyway - this shows immediately.
+    last_error_status: Optional[int] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

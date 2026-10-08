@@ -237,7 +237,8 @@ def check_item(conn, client: Anthropic, settings: Settings, item: WatchedItem, d
         html = get_text(item.url, headers={"User-Agent": USER_AGENT})
     except Exception as exc:
         logger.warning("Could not fetch watched item %r (%s): %s", item.name, item.url, exc)
-        failures = watched_items_repo.record_check_failure(conn, item.id)
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        failures = watched_items_repo.record_check_failure(conn, item.id, status_code=status_code)
         _maybe_send_dead_alert(conn, settings, item, failures, dry_run)
         return {"checked": False, "alerted": False}
 
@@ -251,18 +252,22 @@ def check_item(conn, client: Anthropic, settings: Settings, item: WatchedItem, d
         return {"checked": True, "alerted": False}
 
     image_url = (_image_url_from_jsonld(product_jsonld) if product_jsonld else "") or extract_og_image(html)
-    price = product.price if product.in_stock else None
+    # Stored regardless of stock status (still useful to know what an
+    # out-of-stock item is priced at) - in_stock is the separate signal for
+    # whether it's actually purchasable right now, used below to gate
+    # alerting (you can't act on a good price for something you can't buy).
+    price = product.price
     logger.info(
         "Watched item %r check: title=%r price=%s currency=%s in_stock=%s image=%s",
         item.name, product.title, product.price, product.currency, product.in_stock, bool(image_url),
     )
     watched_items_repo.record_check_result(
         conn, item.id, price=price, extracted_title=product.title or None, currency=product.currency or None,
-        description=product.description or None, image_url=image_url or None,
+        description=product.description or None, image_url=image_url or None, in_stock=product.in_stock,
     )
 
     alerted = False
-    if price is not None:
+    if price is not None and product.in_stock:
         item = watched_items_repo.get_watched_item(conn, item.id)  # reload with fresh check-run state
         alerted = _maybe_send_alert(conn, settings, item, price, dry_run)
 

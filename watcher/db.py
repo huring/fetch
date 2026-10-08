@@ -144,11 +144,13 @@ CREATE TABLE IF NOT EXISTS watched_items (
     extracted_image_url TEXT,
     currency TEXT,
     current_price INTEGER,
+    in_stock INTEGER,
     lowest_price_seen INTEGER,
     last_alert_price INTEGER,
     last_checked_at TEXT,
     consecutive_check_failures INTEGER NOT NULL DEFAULT 0,
     dead_alert_sent INTEGER NOT NULL DEFAULT 0,
+    last_error_status INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -372,6 +374,37 @@ def _migrate_add_watched_item_enrichment(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_add_watched_item_in_stock(conn: sqlite3.Connection) -> None:
+    """Adds in_stock to a watched_items table created before it existed -
+    without it, "genuinely out of stock as of the last check" (current_price
+    is None *because* of this) looked identical in the admin UI to "never
+    successfully checked yet" (current_price is also None). No-op on a
+    fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "watched_items" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(watched_items)")}
+    if "in_stock" not in columns:
+        conn.execute("ALTER TABLE watched_items ADD COLUMN in_stock INTEGER")
+        conn.commit()
+
+
+def _migrate_add_watched_item_last_error_status(conn: sqlite3.Connection) -> None:
+    """Adds last_error_status to a watched_items table created before it
+    existed - the most recent failed check's HTTP status code, so the admin
+    UI can show a distinct "blocked" badge for 403/429 (confirmed live,
+    2026-10, on a Shopify storefront that rate-limits automated requests)
+    instead of lumping it in with every other failure reason. No-op on a
+    fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "watched_items" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(watched_items)")}
+    if "last_error_status" not in columns:
+        conn.execute("ALTER TABLE watched_items ADD COLUMN last_error_status INTEGER")
+        conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -389,6 +422,8 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_watched_item_currency(conn)
     _migrate_add_watched_item_failure_tracking(conn)
     _migrate_add_watched_item_enrichment(conn)
+    _migrate_add_watched_item_in_stock(conn)
+    _migrate_add_watched_item_last_error_status(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

@@ -13,7 +13,9 @@
         <div class="font-medium text-gray-100">{{ item.extracted_title or item.name }}</div>
         {% if item.extracted_description %}<p class="text-gray-400 mt-1">{{ item.extracted_description }}</p>{% endif %}
         <div class="text-gray-400 mt-1">
-            {{ item.current_price if item.current_price is not none else "-" }}{{ " " ~ item.currency if item.current_price is not none and item.currency else "" }}
+            {% if item.current_price is not none %}{{ item.current_price }}{{ " " ~ item.currency if item.currency else "" }}{% if item.in_stock == false %} (out of stock){% endif %}
+            {% elif item.in_stock == false %}out of stock
+            {% else %}-{% endif %}
             &middot; last checked {{ item.last_checked_at or "never" }}
         </div>
     </div>
