@@ -3,6 +3,33 @@
 Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
+## 2026-10-09
+- **Fixed a CI segfault introduced by the "Fetch" repo rename** (related to
+  backlog #15/#22) - re-running the build workflow after renaming the GitHub
+  repo crashed the `test` job outright with "Fatal Python error: Segmentation
+  fault", not a normal test failure. Root-caused (reproduced reliably in a
+  clean Python 3.12 container, matching CI, vs. never seen locally on Python
+  3.9) to a real concurrency bug in the admin app's scheduler shutdown: every
+  background job (the scheduled fetch tick, digest, liveness sweep, a manual
+  "run now") shares one SQLite connection, serialized against each other by
+  a lock - but the shutdown path was closing that same connection without
+  taking that lock first. If a job was still mid-query at that exact moment,
+  two threads touched the same native SQLite connection at once - a C-level
+  race, not something Python's GIL alone prevents. Fixed by having shutdown
+  try to take the same lock (non-blocking, so a slow job still can't hold up
+  a container stop - that's the whole point of the non-blocking shutdown
+  this follows) and skip the close if something's still using it; an
+  unclosed connection is reclaimed by the OS at process exit regardless, and
+  every write already commits through its own `conn.commit()` elsewhere, so
+  nothing is lost. Verified with a tight 40-iteration stress script (fetch
+  and the inter-phrase sleep both mocked instant - the worst-case timing for
+  triggering the race) and three full suite runs in a fresh Python 3.12
+  container, all clean. A first attempt also mocked out the real
+  inter-phrase sleep in tests to stop background threads from piling up,
+  but that surfaced a different, unrelated pre-existing timing assumption in
+  `test_healthz_starting_when_no_runs` - reverted that part; left as its own
+  backlog item (#27) rather than fixed as a side effect of this one.
+
 ## 2026-10-08
 - **Code-side rename to "Fetch"** (partial progress on backlog #15) - README
   title/intro, the two example GHCR paths in the Portainer deploy section,

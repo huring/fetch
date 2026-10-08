@@ -215,7 +215,31 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if scheduler.running:
             scheduler.shutdown(wait=False)
         conn.close()
-        scheduler_conn.close()
+        # scheduler_conn is shared with every background job (see
+        # scheduler_lock above) - closing it while one is still mid-query is
+        # a real C-level race (sqlite3's check_same_thread=False only
+        # disables a safety check, it doesn't make concurrent use/close
+        # safe), confirmed live (2026-10) as a reliable interpreter segfault
+        # under Python 3.12 once a job's own work got fast enough (mocked
+        # fetch, no real sleep in a repro script) to still be running at
+        # this exact moment. shutdown(wait=False) only stops *future* job
+        # submissions, not one already in flight, so a non-blocking
+        # try-acquire of the same lock every job holds for its own body
+        # closes the connection only when nothing is using it right now -
+        # a *blocking* acquire here was tried first and reverted: it
+        # defeats the entire point of wait=False above, turning a cheap
+        # shutdown into one that waits out a slow job's full real-world
+        # runtime (every request_delay_seconds sleep included) before a
+        # container can stop. Skipping the close when a job still holds the
+        # lock is safe either way - an unclosed sqlite3 connection is
+        # reclaimed by the OS at process exit regardless, and every write
+        # already goes through its own conn.commit() elsewhere, so nothing
+        # is lost by not getting a clean WAL checkpoint here too.
+        if scheduler_lock.acquire(blocking=False):
+            try:
+                scheduler_conn.close()
+            finally:
+                scheduler_lock.release()
 
     app = FastAPI(title="Fetch admin", lifespan=lifespan)
     app.include_router(router)
