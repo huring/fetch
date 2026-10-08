@@ -70,3 +70,6 @@ The current bucket names (`found`/`summary`/`threshold`) aren't clear to me at a
 
 ## 19. New marketplace: Auctionet
 https://auctionet.com/sv/search 
+
+## 20. New marketplace: Luleå Auktionsverk
+https://www.luleaauktionsverk.se/
