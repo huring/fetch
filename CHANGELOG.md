@@ -4,6 +4,21 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed test_admin_routes.py's full suite silently taking minutes longer
+  than it reports** (was backlog #27) - confirmed live in CI: a run that
+  prints "263 passed in ~18s" was actually taking ~8 minutes to finish.
+  Every one of this file's ~30 `client` fixtures fires its own immediate
+  fetch cycle on a background thread that outlives its own test (by
+  design - a slow job shouldn't hold up a real container's shutdown), and
+  with a real 2-second sleep between phrases, Python won't let the process
+  fully exit until every one of those threads finishes naturally - none of
+  which shows up in pytest's own printed duration at all. Fixed by making
+  that sleep instant in tests, after first making the one test whose
+  assertion depended on the old slow timing (`test_healthz_starting_when_no_runs`)
+  immune to it instead, by directly preventing a run from being recorded in
+  its own isolated client rather than racing to check before one
+  appears. Confirmed fixed under both Python 3.9 (local) and 3.12 (CI's
+  version) - real wall-clock time now matches pytest's reported duration.
 - **Fixed a CI segfault introduced by the "Fetch" repo rename** (related to
   backlog #15/#22) - re-running the build workflow after renaming the GitHub
   repo crashed the `test` job outright with "Fatal Python error: Segmentation

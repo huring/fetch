@@ -45,11 +45,27 @@ def no_real_marketplace_fetches():
     process by then - gets intercepted by a mock meant for an unrelated
     test, breaking it in a confusing, hard-to-reproduce way. Keeping the
     patch open for this whole module closes that race for every test in it;
-    only the module boundary remains a (much narrower) residual risk."""
+    only the module boundary remains a (much narrower) residual risk.
+
+    Also patches out pipeline.py's inter-phrase time.sleep(request_delay_seconds)
+    (confirmed live, 2026-10 - backlog #22/#27): every one of this module's
+    ~30 `client` fixtures fires its own immediate `_tick()` on a background
+    thread that `scheduler.shutdown(wait=False)` never waits for, and with a
+    real sleep each of those threads keeps running real wall-clock time
+    (2s x several phrases x several marketplaces) long after its own test
+    function already returned. Python's interpreter won't fully exit until
+    every one of these non-daemon threads finishes naturally, which doesn't
+    show up in pytest's own printed duration at all - confirmed in CI as
+    several minutes of silent, invisible slowdown on top of a suite that
+    reports well under a minute. With the fetch itself already mocked
+    instant, nothing meaningful is lost by also making the sleep between
+    phrases instant. (test_healthz_starting_when_no_runs no longer depends
+    on this being slow - see its own comment - so this is safe now.)"""
     with patch("watcher.sources.blocket.fetch", return_value=[]), \
          patch("watcher.sources.vinted.fetch", return_value=[]), \
          patch("watcher.sources.rehifi.fetch", return_value=[]), \
-         patch("watcher.sources.auctionet.fetch", return_value=[]):
+         patch("watcher.sources.auctionet.fetch", return_value=[]), \
+         patch("watcher.pipeline.time.sleep"):
         yield
 
 
@@ -594,8 +610,21 @@ def test_clear_data_removes_listings_keeps_searches(client):
     assert len(searches.list_searches(conn)) > 0
 
 
-def test_healthz_starting_when_no_runs(client):
-    response = client.get("/healthz")
+def test_healthz_starting_when_no_runs(tmp_path):
+    # Deliberately not the shared `client` fixture: this test's whole premise
+    # is "no runs exist yet", but the scheduler's immediate startup tick (see
+    # create_app) races to create one on its own background thread - with
+    # the inter-phrase sleep mocked instant (see no_real_marketplace_fetches)
+    # that race is won often enough to make this flaky. Patching out
+    # run_marketplace_cycle itself removes the race instead of just
+    # narrowing it - no run can be created no matter how fast the tick fires.
+    settings = make_settings(str(tmp_path / "test.db"))
+    with patch("watcher.admin.app.run_marketplace_cycle", return_value={}):
+        app = create_app(settings)
+        with TestClient(app) as test_client:
+            response = test_client.get("/healthz")
+            test_client.app.state.scheduler.remove_all_jobs()
+
     assert response.status_code == 200
     assert response.json()["status"] == "starting"
 
