@@ -154,13 +154,17 @@ def search_listings(request: Request, search_id: int, bucket: str = "found"):
 
 
 @router.get("/feed", response_class=HTMLResponse)
-def feed(request: Request, bucket: str = "daily_roundup", search_id: Optional[int] = None):
+def feed(request: Request, bucket: str = "daily_roundup", search_id: str = ""):
     conn = request.app.state.conn
     settings = request.app.state.settings
     if bucket not in ("daily_roundup", "instant_alert"):
         bucket = "daily_roundup"
+    # The "All searches" <option> submits search_id="" (empty string, not
+    # absent) - FastAPI would reject that against an Optional[int] param, so
+    # it's taken as a plain string here and parsed by hand instead.
+    selected_search_id = int(search_id) if search_id.strip() else None
     rows = storage.list_feed_listings(
-        conn, bucket, settings.score_digest_min, settings.score_instant_threshold, search_id=search_id
+        conn, bucket, settings.score_digest_min, settings.score_instant_threshold, search_id=selected_search_id
     )
     listings = [dict(row, age_days=_age_days(row["first_seen_at"])) for row in rows]
     all_searches = searches_repo.list_searches(conn)
@@ -168,7 +172,7 @@ def feed(request: Request, bucket: str = "daily_roundup", search_id: Optional[in
         request, "feed.html",
         {
             "listings": listings, "bucket": bucket, "bucket_label": storage.BUCKET_LABELS[bucket],
-            "searches": all_searches, "selected_search_id": search_id,
+            "searches": all_searches, "selected_search_id": selected_search_id,
         },
     )
 

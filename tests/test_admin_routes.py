@@ -209,6 +209,12 @@ def test_feed_shows_daily_roundup_by_default(client):
     filtered_response = client.get(f"/feed?search_id={other_search.id}")
     assert "Roundup item" not in filtered_response.text
 
+    # The "All searches" <option value=""> submits search_id="" (an empty
+    # string, not an absent param) - must not 422.
+    all_response = client.get("/feed?search_id=")
+    assert all_response.status_code == 200
+    assert "Roundup item" in all_response.text
+
 
 def test_create_search_via_form(client):
     response = client.post(
