@@ -51,7 +51,7 @@ the auction-marketplace infra built for Auctionet applies here too).
 **Important wrinkle Lars flagged**: this auction house only runs auctions
 monthly, so there often won't be any ongoing items at all between auctions -
 the adapter/polling needs to handle "nothing live right now" as a normal,
-expected state, not a failure (e.g. not tripping the source-health
+expected state, not a failure (e.g. not tripping the source-heaChecklth
 "N failures in a row" alert just because a month's auction hasn't started).
 
 ## 24. Show status badge on searches page
@@ -59,9 +59,6 @@ When "Run now" is clicked, update the status-badge to a yellow "running" badge w
 
 ## 25. Delete items when searches are deleted
 When i remove a search, delete all the items associated whith that search as well. Keep the pricing info if there is any, incase i add the item later.
-
-## 26. UI when using wizard is really laggy
-The form for typing the prompt to create a search is really laggy and unresponsive.
 
 ## 29. Fix Vinted via FlareSolverr
 Vinted now serves a real Cloudflare "managed challenge" (JS computational

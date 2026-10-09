@@ -4,6 +4,19 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed the admin UI's wizard feeling laggy while typing a prompt (was
+  backlog #26)** - root cause: `base.html` was loading Tailwind's "Play
+  CDN" script (`cdn.tailwindcss.com`), a ~400KB JIT compiler that recomputes
+  styles in the browser and keeps a `MutationObserver` watching the whole
+  page for as long as it's open - Tailwind's own docs explicitly call this
+  unsuitable for production. Every admin page carried that overhead, but
+  the wizard's free-text prompt box is the one place in this app where
+  you're actually typing continuously, so it's where the cost was most
+  noticeable. Replaced it with a plain stylesheet compiled once at Docker
+  build time (new `cssbuild` stage using Tailwind's standalone CLI - no
+  Node/npm needed in the image - see `tailwind.config.js`), served as a
+  static file. No template here used a `dark:` variant, so nothing else
+  about the (dark-only) look changes.
 - **Vinted is now excluded by default from brand-new searches** - confirmed
   live that every Vinted request (`/catalog` search and item pages) now
   403s behind a genuine Cloudflare "managed challenge" (a JS computational

@@ -15,12 +15,14 @@ import datetime
 import logging
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from anthropic import Anthropic
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from watcher import db
 from watcher import marketplace_configs as marketplace_configs_repo
@@ -314,4 +316,8 @@ def create_app(settings: Optional[Settings] = None, *, start_background_jobs: bo
 
     app = FastAPI(title="Fetch admin", lifespan=lifespan)
     app.include_router(router)
+    # The compiled tailwind.css built by the Dockerfile's cssbuild stage
+    # (see tailwind.config.js) - base.html links to it as a plain
+    # stylesheet instead of loading the Play CDN's runtime compiler.
+    app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
     return app

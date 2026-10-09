@@ -5,13 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Fetch{% endblock %}</title>
     {% block head %}{% endblock %}
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        // Dark theme only (no light-theme toggle needed) - forced via
-        // tailwind.config rather than relying on the OS/browser preference,
-        // so it always looks the same regardless of the viewer's own setting.
-        tailwind.config = { darkMode: "class" };
-    </script>
+    <!-- A plain precompiled stylesheet (see tailwind.config.js and the
+         Dockerfile's cssbuild stage), not the Play CDN <script> this used to
+         load - that runtime JIT compiler is what made the wizard's prompt
+         textarea feel laggy (backlog #26, confirmed 2026-10). -->
+    <link rel="stylesheet" href="/static/tailwind.css">
 </head>
 <body class="dark bg-gray-900 text-gray-100 min-h-screen">
     <nav class="bg-gray-800 border-b border-gray-700">

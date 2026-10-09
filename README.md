@@ -88,11 +88,16 @@ input/output tokens and dollar cost, logged per completed scoring batch.
 
 ## Searches and the admin UI
 
-The admin UI is server-rendered Jinja2 (no frontend build step) styled with
-Tailwind's CDN script (`<script src="...cdn.tailwindcss.com">`, compiled in
-the browser rather than a build-time pipeline - deliberately, to keep this
-project's "no Node toolchain" simplicity) and a fixed dark theme (no
-light-theme toggle - there isn't one to maintain).
+The admin UI is server-rendered Jinja2 (no frontend build step, no custom
+JS beyond one trivial progressive-enhancement script) styled with Tailwind,
+compiled once into a static stylesheet during the Docker build (via
+Tailwind's standalone CLI - see `tailwind.config.js` and the Dockerfile's
+`cssbuild` stage) rather than Tailwind's "Play CDN" `<script>`, which
+recompiles styles live in the browser and was dropped (2026-10) after it
+turned out to make the admin UI's free-text inputs feel laggy. No Node/npm
+is needed anywhere, including at build time - the standalone CLI is a
+single downloaded binary. A fixed dark theme (no light-theme toggle - there
+isn't one to maintain).
 
 Everything you watch for is a **search**: a name, a scope (local/national + a
 location), whether shipping should be required, a deterministic prefilter
