@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -270,47 +271,71 @@ def _transcript_from_form(form_data) -> List[Dict[str, str]]:
     return transcript
 
 
-def _wizard_error(request: Request, error: str, search_id: Optional[int]) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request, "search_prompt_wizard.html", {"stage": "error", "error": error, "search_id": search_id}
-    )
-
-
-def _advance_wizard(request: Request, search_id: Optional[int], transcript: List[Dict[str, str]]) -> HTMLResponse:
-    conn = request.app.state.conn
-    settings = request.app.state.settings
-    client = request.app.state.client
+def build_wizard_turn_context(
+    conn, client, settings, search_id: Optional[int], transcript: List[Dict[str, str]]
+) -> Dict[str, object]:
+    """Runs one turn of the builder and returns the template context for
+    whatever screen comes next (ask/draft/error) - a plain dict, not a
+    response, since this now runs inside a background scheduler job (see
+    app.py's trigger_wizard_turn) rather than directly in a request handler.
+    That split is what actually fixes the 504: a slow Claude call no longer
+    ties up an HTTP response long enough for a reverse proxy in front of
+    this app to give up on it - the triggering request gets an immediate
+    redirect to a status page instead (see _start_wizard_turn), which polls
+    (plain meta-refresh, no JS) until this function's result is ready."""
     if client is None:
-        return _wizard_error(
-            request, "ANTHROPIC_API_KEY isn't configured, so the search builder can't call Claude.", search_id
-        )
+        return {"stage": "error", "error": "ANTHROPIC_API_KEY isn't configured, so the search builder can't call Claude.", "search_id": search_id}
 
     round_count = sum(1 for turn in transcript if turn["role"] == "assistant")
     force_propose = round_count >= search_builder.MAX_QUESTION_ROUNDS
     try:
         turn = search_builder.run_turn(conn, client, settings, transcript, force_propose=force_propose)
     except search_builder.SearchBuilderError as exc:
-        return _wizard_error(request, str(exc), search_id)
+        return {"stage": "error", "error": str(exc), "search_id": search_id}
 
     if turn.action == "ask_user":
+        return {
+            "stage": "ask", "question": turn.ask_user.question, "search_id": search_id,
+            "transcript_json": json.dumps(transcript), "pending_question_json": turn.model_dump_json(),
+        }
+
+    draft = turn.propose_search
+    return {
+        "stage": "draft", "draft": draft, "draft_json": draft.model_dump_json(),
+        "transcript_json": json.dumps(transcript), "counts": None, "name_error": None,
+        "name_value": draft.name, "checked_indices": set(range(len(draft.search_phrases))),
+        "search_id": search_id, "marketplace_names": _marketplace_names(),
+    }
+
+
+def _start_wizard_turn(request: Request, search_id: Optional[int], transcript: List[Dict[str, str]]) -> HTMLResponse:
+    if request.app.state.client is None:
         return templates.TemplateResponse(
             request, "search_prompt_wizard.html",
             {
-                "stage": "ask", "question": turn.ask_user.question, "search_id": search_id,
-                "transcript_json": json.dumps(transcript), "pending_question_json": turn.model_dump_json(),
+                "stage": "error", "search_id": search_id,
+                "error": "ANTHROPIC_API_KEY isn't configured, so the search builder can't call Claude.",
             },
         )
+    job_id = uuid.uuid4().hex
+    request.app.state.wizard_jobs[job_id] = {"status": "pending"}
+    request.app.state.trigger_wizard_turn(job_id, search_id, transcript)
+    return RedirectResponse(f"/searches/wizard/{job_id}", status_code=303)
 
-    draft = turn.propose_search
-    return templates.TemplateResponse(
-        request, "search_prompt_wizard.html",
-        {
-            "stage": "draft", "draft": draft, "draft_json": draft.model_dump_json(),
-            "transcript_json": json.dumps(transcript), "counts": None, "name_error": None,
-            "name_value": draft.name, "checked_indices": set(range(len(draft.search_phrases))),
-            "search_id": search_id, "marketplace_names": _marketplace_names(),
-        },
-    )
+
+@router.get("/searches/wizard/{job_id}", response_class=HTMLResponse)
+def wizard_status(request: Request, job_id: str):
+    job = request.app.state.wizard_jobs.get(job_id)
+    if job is None:
+        return RedirectResponse("/searches", status_code=303)
+    if job["status"] == "pending":
+        return templates.TemplateResponse(request, "search_prompt_wizard.html", {"stage": "generating"})
+    # Consumed on first successful read - this is in-memory, request-scoped
+    # state for one drafting session, not anything worth keeping around
+    # (and the "ask"/"draft" screen that follows carries everything needed
+    # to continue in its own hidden fields, not this job_id).
+    request.app.state.wizard_jobs.pop(job_id, None)
+    return templates.TemplateResponse(request, "search_prompt_wizard.html", job["context"])
 
 
 def _handle_draft_action(request: Request, form_data, search_id: Optional[int]) -> HTMLResponse:
@@ -367,7 +392,7 @@ def new_search_from_prompt_form(request: Request):
 @router.post("/searches/new-from-prompt")
 async def new_search_from_prompt_turn(request: Request):
     form_data = await request.form()
-    return _advance_wizard(request, None, _transcript_from_form(form_data))
+    return _start_wizard_turn(request, None, _transcript_from_form(form_data))
 
 
 @router.post("/searches/new-from-prompt/draft")
@@ -391,7 +416,7 @@ def edit_search_from_prompt_form(request: Request, search_id: int):
 @router.post("/searches/{search_id}/edit-from-prompt")
 async def edit_search_from_prompt_turn(request: Request, search_id: int):
     form_data = await request.form()
-    return _advance_wizard(request, search_id, _transcript_from_form(form_data))
+    return _start_wizard_turn(request, search_id, _transcript_from_form(form_data))
 
 
 @router.post("/searches/{search_id}/edit-from-prompt/draft")

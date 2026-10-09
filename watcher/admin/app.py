@@ -24,7 +24,7 @@ from fastapi import FastAPI
 
 from watcher import db
 from watcher import marketplace_configs as marketplace_configs_repo
-from watcher.admin.routes import router
+from watcher.admin.routes import build_wizard_turn_context, router
 from watcher.liveness import run_auction_end_sweep, run_liveness_sweep
 from watcher.marketplaces import MARKETPLACES
 from watcher.pipeline import (
@@ -82,10 +82,19 @@ def create_app(settings: Optional[Settings] = None, *, start_background_jobs: bo
         client = Anthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else None
         app.state.conn = conn
         app.state.settings = settings
-        # Exposed for the NLP search builder (backlog #21), the one HTTP
-        # route in this app that calls Claude synchronously in the request
-        # path - every other use of `client` below is a background job.
+        # Exposed so the search-builder routes can check up front whether
+        # Claude is even configured (see routes._start_wizard_turn) - the
+        # actual call happens in trigger_wizard_turn below, on the
+        # scheduler's own thread like every other job, not here.
         app.state.client = client
+        # job_id -> {"status": "pending"} | {"status": "done", "context": {...}}
+        # for the search builder's async turn handling (see
+        # trigger_wizard_turn/routes.wizard_status) - in-memory and
+        # request-scoped per drafting session, not meant to survive a
+        # restart, so a plain dict is enough; no explicit lock needed since
+        # every read/write touches a single key by its own unique job_id
+        # (plain dict item get/set/pop are already atomic under the GIL).
+        app.state.wizard_jobs = {}
 
         # Background jobs (tick, digest, liveness sweep, manually-triggered
         # runs) get their own connection, separate from the one HTTP routes
@@ -217,6 +226,43 @@ def create_app(settings: Optional[Settings] = None, *, start_background_jobs: bo
         def trigger_watched_item_check(item_id: int) -> None:
             scheduler.add_job(_check_watched_item_now, args=[item_id], next_run_time=datetime.datetime.now())
 
+        def _run_wizard_turn_job(job_id: str, search_id, transcript) -> None:
+            # Same scheduler-thread pattern as every job above - this is
+            # what actually fixes the 504 Gateway Timeout reported live
+            # (2026-10): the search builder's Claude call used to run
+            # directly inside the HTTP request/response cycle, and a slow
+            # generation (the structured-output call here is noticeably
+            # heavier than the single-field extraction price_watch.py does)
+            # could outlast whatever timeout the reverse proxy in front of
+            # this app allows, which then returns its own 504 to the browser
+            # while the Python request keeps running regardless, wasted.
+            # Now the triggering request gets an immediate redirect to a
+            # status page (see routes._start_wizard_turn/wizard_status)
+            # instead of waiting on this.
+            with scheduler_lock:
+                try:
+                    # app.state.client, not the `client` closure var every
+                    # other job above uses - kept in sync with
+                    # routes._start_wizard_turn's own check of the same
+                    # attribute, one source of truth for whether Claude is
+                    # configured rather than two variables that happen to
+                    # agree today but have no reason to stay that way.
+                    context = build_wizard_turn_context(
+                        scheduler_conn, app.state.client, settings, search_id, transcript
+                    )
+                except Exception:
+                    logger.exception("Search builder turn failed for job %s", job_id)
+                    context = {
+                        "stage": "error", "search_id": search_id,
+                        "error": "Something went wrong talking to Claude - please try again.",
+                    }
+                app.state.wizard_jobs[job_id] = {"status": "done", "context": context}
+
+        def trigger_wizard_turn(job_id: str, search_id, transcript) -> None:
+            scheduler.add_job(
+                _run_wizard_turn_job, args=[job_id, search_id, transcript], next_run_time=datetime.datetime.now()
+            )
+
         if start_background_jobs:
             scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
             hour, minute = settings.digest_time.split(":")
@@ -227,6 +273,7 @@ def create_app(settings: Optional[Settings] = None, *, start_background_jobs: bo
         app.state.scheduler = scheduler
         app.state.trigger_search_run = trigger_search_run
         app.state.trigger_watched_item_check = trigger_watched_item_check
+        app.state.trigger_wizard_turn = trigger_wizard_turn
 
         yield
 

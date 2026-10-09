@@ -4,6 +4,21 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed a 504 Gateway Timeout when generating a search from a prompt** -
+  reported live right after shipping the prompt-based search builder: its
+  Claude call ran directly inside the HTTP request/response cycle, and a
+  slow generation (heavier than the single-field extraction price_watch.py
+  does) could outlast whatever timeout the reverse proxy in front of this
+  app allows - the proxy then hands the browser its own 504 while the
+  Python request keeps running regardless, the response just never reaches
+  anyone. Fixed by moving the Claude call onto the scheduler's own
+  background thread (the same mechanism "Run now"/"Check now" already use)
+  instead of running it inside the request: submitting a prompt (or an
+  answer to a clarifying question) now gets an immediate redirect to a
+  status page, which polls via a plain meta-refresh (no JS, consistent with
+  the rest of this app) until the result is ready - showing a spinner and
+  "Claude is working on this..." in the meantime, exactly the visual
+  indicator also asked for alongside the fix.
 - **Added a prompt-based way to create and edit searches** (was backlog #21)
   - until now, configuring a search (especially a "rated" one with hard/soft
   criteria and watched models) meant hand-filling a form with ~15 fields.

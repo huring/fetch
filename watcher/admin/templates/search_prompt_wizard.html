@@ -1,14 +1,35 @@
 {% extends "base.html" %}
 {% block title %}{{ "Edit" if search_id else "New" }} search via prompt - Fetch{% endblock %}
+{% block head %}
+{% if stage == "generating" %}
+<!-- No JS in this app - a plain meta-refresh polls this same page until the
+     background job (see app.py's trigger_wizard_turn) finishes. Submitting
+     the Claude call itself as a background job rather than waiting on it
+     inside the request is what actually fixes the 504 - a slow generation
+     no longer ties up an HTTP response long enough for a reverse proxy in
+     front of this app to give up on it. -->
+<meta http-equiv="refresh" content="2">
+{% endif %}
+{% endblock %}
 {% block content %}
 {% set turn_action_url = "/searches/" ~ search_id ~ "/edit-from-prompt" if search_id else "/searches/new-from-prompt" %}
 {% set draft_action_url = turn_action_url ~ "/draft" %}
 <h1 class="text-xl font-semibold mb-1">{{ "Edit" if search_id else "New" }} search via prompt</h1>
+{% if stage != "generating" %}
 <p class="text-sm text-gray-400 mb-4">
     Describe what you're looking for in plain text - Claude will ask if anything's unclear, then propose a
     full search configuration to review before it's saved.
     <a href="{{ '/searches/' ~ search_id ~ '/edit' if search_id else '/searches/new' }}" class="underline">Build it manually instead</a>.
 </p>
+{% endif %}
+
+{% if stage == "generating" %}
+<div class="flex flex-col items-center justify-center py-16 text-center">
+    <div class="h-10 w-10 rounded-full border-4 border-gray-700 border-t-indigo-500 animate-spin mb-4"></div>
+    <p class="text-gray-200">Claude is working on this...</p>
+    <p class="text-sm text-gray-500 mt-1">This page refreshes automatically - it can take up to a minute.</p>
+</div>
+{% endif %}
 
 {% if stage == "start" %}
 <form method="post" action="{{ turn_action_url }}" class="space-y-4">

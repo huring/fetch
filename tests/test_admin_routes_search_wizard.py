@@ -1,4 +1,5 @@
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -44,6 +45,24 @@ def make_fake_claude_client(responses_text):
         return SimpleNamespace(content=content, usage=SimpleNamespace(input_tokens=200, output_tokens=100))
 
     return SimpleNamespace(messages=SimpleNamespace(create=create))
+
+
+def submit_wizard_turn(client, url, data, timeout=5):
+    """Every wizard-turn POST now redirects to a status page and runs the
+    actual Claude call as a background scheduler job (fixes a live 504 -
+    see CHANGELOG), so a test has to follow that redirect and poll, same as
+    a real browser's meta-refresh would, rather than reading content
+    straight off the POST response."""
+    response = client.post(url, data=data, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    status_url = response.headers["location"]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status_response = client.get(status_url)
+        if "Claude is working on this" not in status_response.text:
+            return status_response
+        time.sleep(0.02)
+    raise AssertionError(f"Wizard job at {status_url} did not finish within {timeout}s")
 
 
 ASK_USER_JSON = json.dumps({
@@ -93,10 +112,64 @@ def test_turn_without_configured_api_key_shows_error(client):
     assert "ANTHROPIC_API_KEY" in response.text
 
 
+def test_turn_redirects_to_a_status_page_instead_of_blocking_on_claude(client):
+    """The actual fix for the live 504 Gateway Timeout report (2026-10):
+    the triggering request must get an immediate redirect, not wait on
+    Claude itself - a slow generation blocking the HTTP response is exactly
+    what let a reverse proxy's own timeout cut it off."""
+    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+
+    response = client.post("/searches/new-from-prompt", data={"prompt": "x"}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/searches/wizard/")
+
+
+def test_status_page_shows_generating_while_the_job_is_still_pending(client):
+    def slow_create(**kwargs):
+        time.sleep(0.3)
+        content = [SimpleNamespace(type="text", text=PROPOSE_SEARCH_JSON)]
+        return SimpleNamespace(content=content, usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+
+    client.app.state.client = SimpleNamespace(messages=SimpleNamespace(create=slow_create))
+
+    redirect = client.post("/searches/new-from-prompt", data={"prompt": "x"}, follow_redirects=False)
+    status_response = client.get(redirect.headers["location"])
+
+    assert status_response.status_code == 200
+    assert "Claude is working on this" in status_response.text
+    assert '<meta http-equiv="refresh" content="2">' in status_response.text
+
+
+def test_status_page_redirects_to_searches_for_an_unknown_job_id(client):
+    response = client.get("/searches/wizard/not-a-real-job-id", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/searches"
+
+
+def test_status_job_is_consumed_after_being_read_once(client):
+    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+    redirect = client.post("/searches/new-from-prompt", data={"prompt": "x"}, follow_redirects=False)
+    status_url = redirect.headers["location"]
+    first = None
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        first = client.get(status_url)
+        if "Claude is working on this" not in first.text:
+            break
+        time.sleep(0.02)
+
+    second = client.get(status_url, follow_redirects=False)
+
+    assert "Marantz PM6007" in first.text
+    assert second.status_code == 303
+    assert second.headers["location"] == "/searches"
+
+
 def test_first_turn_can_ask_a_question(client):
     client.app.state.client = make_fake_claude_client([ASK_USER_JSON])
 
-    response = client.post("/searches/new-from-prompt", data={"prompt": "En bra förstärkare"})
+    response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "En bra förstärkare"})
 
     assert response.status_code == 200
     assert "Vilken prisgräns vill du sätta?" in response.text
@@ -107,13 +180,13 @@ def test_first_turn_can_ask_a_question(client):
 def test_answering_a_question_leads_to_a_draft(client):
     client.app.state.client = make_fake_claude_client([ASK_USER_JSON, PROPOSE_SEARCH_JSON])
 
-    ask_response = client.post("/searches/new-from-prompt", data={"prompt": "En bra förstärkare"})
+    ask_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "En bra förstärkare"})
     transcript = _extract_hidden_value(ask_response.text, "transcript")
     pending_question = _extract_hidden_value(ask_response.text, "pending_question_json")
 
-    draft_response = client.post(
-        "/searches/new-from-prompt",
-        data={
+    draft_response = submit_wizard_turn(
+        client, "/searches/new-from-prompt",
+        {
             "transcript": transcript, "pending_question_json": pending_question,
             "answer": "Max 3000 kr",
         },
@@ -127,13 +200,13 @@ def test_answering_a_question_leads_to_a_draft(client):
 def test_skip_button_answers_with_best_judgement(client):
     client.app.state.client = make_fake_claude_client([ASK_USER_JSON, PROPOSE_SEARCH_JSON])
 
-    ask_response = client.post("/searches/new-from-prompt", data={"prompt": "En bra förstärkare"})
+    ask_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "En bra förstärkare"})
     transcript = _extract_hidden_value(ask_response.text, "transcript")
     pending_question = _extract_hidden_value(ask_response.text, "pending_question_json")
 
-    draft_response = client.post(
-        "/searches/new-from-prompt",
-        data={"transcript": transcript, "pending_question_json": pending_question, "skip": "1"},
+    draft_response = submit_wizard_turn(
+        client, "/searches/new-from-prompt",
+        {"transcript": transcript, "pending_question_json": pending_question, "skip": "1"},
     )
 
     assert draft_response.status_code == 200
@@ -142,7 +215,7 @@ def test_skip_button_answers_with_best_judgement(client):
 
 def test_create_from_draft_persists_the_search_with_a_collapsed_prompt(client):
     client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
-    draft_response = client.post("/searches/new-from-prompt", data={"prompt": "Marantz PM6007, max 3000kr"})
+    draft_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"})
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
 
@@ -164,7 +237,7 @@ def test_create_from_draft_persists_the_search_with_a_collapsed_prompt(client):
 
 def test_create_from_draft_drops_unchecked_phrases(client):
     client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
-    draft_response = client.post("/searches/new-from-prompt", data={"prompt": "Marantz PM6007, max 3000kr"})
+    draft_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"})
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
 
@@ -189,7 +262,7 @@ def test_create_from_draft_with_a_duplicate_name_shows_an_inline_error_not_a_cra
     before_count = len(searches_repo.list_searches(conn))
 
     client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
-    draft_response = client.post("/searches/new-from-prompt", data={"prompt": "Marantz PM6007, max 3000kr"})
+    draft_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"})
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
 
@@ -233,7 +306,9 @@ def test_edit_from_prompt_updates_the_existing_search(client):
     created = searches_repo.create_search(conn, Search(name="Old name", max_price=1000))
 
     client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
-    draft_response = client.post(f"/searches/{created.id}/edit-from-prompt", data={"prompt": "Marantz PM6007, max 3000kr"})
+    draft_response = submit_wizard_turn(
+        client, f"/searches/{created.id}/edit-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"}
+    )
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
 
