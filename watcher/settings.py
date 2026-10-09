@@ -39,6 +39,14 @@ class Settings:
     # needs to know its own public address. Left blank, that search's digest
     # entry is just plain text (a count, no link).
     public_base_url: str = ""
+    # Lars's own location, used to sort a "plain" search's results the same
+    # way Blocket's own "Closest" filter would (see marketplaces.py's
+    # _blocket_fetch and blocket.fetch's sort_by_distance param) - a "rated"
+    # search doesn't use this, since Claude's score already orders those.
+    # Defaults to Boden, Norrbotten (confirmed live, 2026-10, as the
+    # coordinates Blocket's own "Closest" sort uses for that town).
+    home_lat: float = 65.80823
+    home_lon: float = 21.67276
 
 
 def load_settings() -> Settings:
@@ -56,4 +64,6 @@ def load_settings() -> Settings:
         dry_run=_bool_env("DRY_RUN", False),
         admin_port=int(os.environ.get("ADMIN_PORT", "8000")),
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
+        home_lat=float(os.environ.get("HOME_LAT", "65.80823")),
+        home_lon=float(os.environ.get("HOME_LON", "21.67276")),
     )

@@ -94,7 +94,18 @@ def _blocket_fetch(
     # typo, "national" scope) falls back to no server-side filter, same as
     # before - pipeline._filter_by_scope still applies client-side.
     location_code = resolve_county_code(search.location) if search.scope == "local" and search.location else None
-    return blocket_source.fetch(phrase, max_pages=settings.max_pages_per_query, location_code=location_code)
+    # A "plain" search has no AI ranking of its own, so its results are
+    # ordered the same way Blocket's own "Closest" sort would - confirmed
+    # live (2026-10) as what Lars actually wants to see first for a
+    # no-Claude search. A "rated" search keeps the default newest-first
+    # fetch order, since Claude's score is what orders those for display.
+    sort_by_distance_from = (settings.home_lat, settings.home_lon) if search.scoring_mode == "plain" else None
+    return blocket_source.fetch(
+        phrase,
+        max_pages=settings.max_pages_per_query,
+        location_code=location_code,
+        sort_by_distance_from=sort_by_distance_from,
+    )
 
 
 def _blocket_enrich_description(url: str) -> str:

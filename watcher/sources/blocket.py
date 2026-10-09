@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import requests
 
@@ -34,7 +34,12 @@ DEFAULT_SUB_CATEGORY = "1.93.3906"  # Ljud & Bild
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/120.0"
 
 
-def fetch(q: str, max_pages: int = 2, location_code: Optional[str] = None) -> List[Listing]:
+def fetch(
+    q: str,
+    max_pages: int = 2,
+    location_code: Optional[str] = None,
+    sort_by_distance_from: Optional[Tuple[float, float]] = None,
+) -> List[Listing]:
     """Fetch listings for a single Blocket search phrase.
 
     The response field names used in ``_parse_ad`` follow the shape documented
@@ -51,6 +56,13 @@ def fetch(q: str, max_pages: int = 2, location_code: Optional[str] = None) -> Li
     location doesn't resolve to a known county (see
     blocket_geo.resolve_county_code), the caller passes None and relies on
     the client-side location match instead (pipeline._filter_by_scope).
+
+    ``sort_by_distance_from``, given as an (lat, lon) tuple, switches from the
+    default newest-first ordering to the same "Closest" sort Blocket's own
+    site offers - confirmed live (2026-10) to genuinely reorder (and
+    therefore, since only the first ``max_pages`` pages are ever fetched,
+    reshape *which* results get pulled in) around that point rather than
+    publish date.
     """
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     listings: List[Listing] = []
@@ -64,6 +76,11 @@ def fetch(q: str, max_pages: int = 2, location_code: Optional[str] = None) -> Li
         }
         if location_code:
             params["location"] = location_code
+        if sort_by_distance_from is not None:
+            lat, lon = sort_by_distance_from
+            params["sort"] = "CLOSEST"
+            params["lat"] = lat
+            params["lon"] = lon
         try:
             data = get_json(SEARCH_URL, params=params, headers=headers)
         except Exception as exc:
@@ -75,6 +92,10 @@ def fetch(q: str, max_pages: int = 2, location_code: Optional[str] = None) -> Li
         for ad in ads:
             listing = _parse_ad(ad)
             if listing is not None:
+                if sort_by_distance_from is not None:
+                    distance = ad.get("distance")
+                    if isinstance(distance, (int, float)):
+                        listing.distance_km = distance
                 listings.append(listing)
     return listings
 

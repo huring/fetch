@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS listings (
     stale_notified_at TEXT,
     auction_ends_at TEXT,
     image_url TEXT,
+    distance_km REAL,
     raw_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(search_id, source, external_id)
 );
@@ -340,6 +341,21 @@ def _migrate_add_listing_image_url(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_add_listing_distance_km(conn: sqlite3.Connection) -> None:
+    """Adds distance_km (see models.Listing) to a listings table created
+    before it existed - distance from Lars's own location, only populated
+    for a "plain" search's Blocket listings (see marketplaces._blocket_fetch),
+    used to sort those the same way Blocket's own "Closest" filter would.
+    No-op on a fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "listings" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(listings)")}
+    if "distance_km" not in columns:
+        conn.execute("ALTER TABLE listings ADD COLUMN distance_km REAL")
+        conn.commit()
+
+
 def _migrate_add_watched_item_currency(conn: sqlite3.Connection) -> None:
     """Adds the currency column to a watched_items table created before
     price_watch.py tracked it (it previously only ever showed "SEK" in
@@ -435,6 +451,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_digest_style(conn)
     _migrate_add_auction_ends_at(conn)
     _migrate_add_listing_image_url(conn)
+    _migrate_add_listing_distance_km(conn)
     _migrate_add_watched_item_currency(conn)
     _migrate_add_watched_item_failure_tracking(conn)
     _migrate_add_watched_item_enrichment(conn)

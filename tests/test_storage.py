@@ -20,7 +20,7 @@ def search_id(conn):
     return created.id
 
 
-def make_listing(external_id="abc123", price=1000, source="blocket"):
+def make_listing(external_id="abc123", price=1000, source="blocket", distance_km=None):
     return Listing(
         source=source,
         external_id=external_id,
@@ -31,6 +31,7 @@ def make_listing(external_id="abc123", price=1000, source="blocket"):
         location="Stockholm",
         ships=True,
         published_at=None,
+        distance_km=distance_km,
         raw={"id": external_id},
     )
 
@@ -177,6 +178,22 @@ def test_list_bucket_listings_filters_by_bucket(conn, search_id):
 
     assert {row["id"] for row in found} == {low, high}
     assert {row["id"] for row in threshold} == {high}
+
+
+def test_list_bucket_listings_orders_plain_matches_by_distance_closest_first(conn, search_id):
+    """Confirmed live (2026-10): a plain search's listings all share the same
+    score (-1, PLAIN_SURFACED_SCORE), so distance is the only thing left to
+    order them by - matching Blocket's own "Closest" sort (see
+    marketplaces._blocket_fetch)."""
+    far = storage.upsert_listing(conn, search_id, make_listing(external_id="far", distance_km=30.0))
+    unknown = storage.upsert_listing(conn, search_id, make_listing(external_id="unknown", distance_km=None))
+    near = storage.upsert_listing(conn, search_id, make_listing(external_id="near", distance_km=1.4))
+    for listing_id in (far, unknown, near):
+        storage.mark_surfaced_plain(conn, listing_id)
+
+    found = storage.list_bucket_listings(conn, search_id, "found", score_digest_min=5, score_instant_threshold=8)
+
+    assert [row["id"] for row in found] == [near, far, unknown]
 
 
 def test_get_surfaced_listings_excludes_pending_and_prefiltered(conn, search_id):

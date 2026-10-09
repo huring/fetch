@@ -103,6 +103,7 @@ def make_listing(external_id, title, price=1000, description=""):
         published_at=None,
         auction_ends_at=None,
         image_url=None,
+        distance_km=None,
         raw={},
     )
 
@@ -295,6 +296,47 @@ def test_run_once_rejects_after_enrichment_reveals_excluded_word():
     assert row["description"] == "Trasig display, annars ok"
 
 
+def test_run_once_rescues_a_title_only_miss_once_description_mentions_the_phrase():
+    """Confirmed live (2026-10) as a real bug otherwise: Blocket's search
+    endpoint returns no description at all, only title - so an amp known
+    only by model name ("Hegel H190") failed the phrase check on title alone
+    and was rejected before ever getting the chance to fetch its full ad
+    text, even though Blocket's own search engine matched it precisely
+    because "förstärkare" appears in the ad body."""
+    conn = make_conn()
+    searches.create_search(
+        conn, Search(name="C", scoring_mode="rated", search_phrases=["förstärkare"], marketplaces=["blocket"])
+    )
+
+    with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Hegel H190")]):
+        with patch("watcher.sources.blocket.fetch_ad_description", return_value="Kraftfull förstärkare i toppskick"):
+            client = make_anthropic_client(
+                [{"listing_index": 0, "score": 7, "reasoning": "r", "uncertain_specs": [], "price_assessment": "p"}]
+            )
+            result = pipeline.run_once(conn, client, make_settings(slack_webhook_url=""))
+
+    assert result["listings_scored"] == 1
+    row = conn.execute("SELECT * FROM listings").fetchone()
+    assert row["description"] == "Kraftfull förstärkare i toppskick"
+
+
+def test_run_once_still_rejects_when_full_description_also_lacks_the_phrase():
+    conn = make_conn()
+    searches.create_search(
+        conn, Search(name="C", scoring_mode="rated", search_phrases=["förstärkare"], marketplaces=["blocket"])
+    )
+
+    with patch("watcher.sources.blocket.fetch", return_value=[make_listing("1", "Hegel H190")]):
+        with patch("watcher.sources.blocket.fetch_ad_description", return_value="Fint skick, inga repor"):
+            client = make_anthropic_client([])
+            result = pipeline.run_once(conn, client, make_settings(slack_webhook_url=""))
+
+    assert result["listings_scored"] == 0
+    row = conn.execute("SELECT * FROM listings").fetchone()
+    assert row["score"] == 0
+    assert row["reasoning"] == "Title/description doesn't mention any word from the search phrases"
+
+
 def test_run_marketplace_cycle_marks_fetched():
     conn = make_conn()
     searches.create_search(conn, Search(name="C", scoring_mode="rated", search_phrases=["x"], marketplaces=["blocket"]))
@@ -409,6 +451,26 @@ def test_send_digest_includes_plain_search_entries():
     assert row["included_in_digest_at"] is not None
 
 
+def test_run_marketplace_cycle_sorts_blocket_by_distance_for_a_plain_search():
+    conn = make_conn()
+    searches.create_search(conn, Search(name="C", scoring_mode="plain", search_phrases=["förstärkare"], marketplaces=["blocket"]))
+
+    with patch("watcher.sources.blocket.fetch", return_value=[]) as fetch:
+        pipeline.run_marketplace_cycle(conn, make_settings(), "blocket")
+
+    assert fetch.call_args.kwargs["sort_by_distance_from"] == (65.80823, 21.67276)
+
+
+def test_run_marketplace_cycle_does_not_sort_blocket_by_distance_for_a_rated_search():
+    conn = make_conn()
+    searches.create_search(conn, Search(name="C", scoring_mode="rated", search_phrases=["förstärkare"], marketplaces=["blocket"]))
+
+    with patch("watcher.sources.blocket.fetch", return_value=[]) as fetch:
+        pipeline.run_marketplace_cycle(conn, make_settings(), "blocket")
+
+    assert fetch.call_args.kwargs["sort_by_distance_from"] is None
+
+
 def test_run_marketplace_cycle_keeps_listings_in_county_when_location_is_a_county_name():
     """Confirmed live (2026-10) as a real bug otherwise: Blocket
     reports a listing's location as a municipality ("Luleå"), not the county
@@ -509,12 +571,12 @@ def test_run_search_cycle_uses_each_row_s_own_marketplace_for_enrichment():
     blocket_listing = SimpleNamespace(
         source="blocket", external_id="1", title="Onkyo A", description="",
         price=1000, url="https://example.com/1", location=None, ships=None,
-        published_at=None, auction_ends_at=None, image_url=None, raw={},
+        published_at=None, auction_ends_at=None, image_url=None, distance_km=None, raw={},
     )
     vinted_listing = SimpleNamespace(
         source="vinted", external_id="2", title="Onkyo B", description="",
         price=1000, url="https://example.com/2", location=None, ships=None,
-        published_at=None, auction_ends_at=None, image_url=None, raw={},
+        published_at=None, auction_ends_at=None, image_url=None, distance_km=None, raw={},
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[blocket_listing]):

@@ -166,6 +166,12 @@ class Listing:
     # watched-item enrichment image - just linked to by its original URL,
     # for the "Top ads" cards (backlog item: richer top-ads panel).
     image_url: Optional[str] = None
+    # Distance in km from Settings.home_lat/home_lon, only set when the
+    # marketplace was actually asked to sort by distance (currently Blocket,
+    # only for a "plain" search - see marketplaces._blocket_fetch). None for
+    # everything else, including a Blocket listing fetched newest-first,
+    # rather than storing a meaningless distance nobody asked to sort by.
+    distance_km: Optional[float] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 

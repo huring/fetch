@@ -74,6 +74,40 @@ def test_fetch_passes_location_code_when_given():
 
 
 @responses.activate
+def test_fetch_sorts_by_distance_when_given_a_point():
+    """Confirmed live (2026-10): Blocket's own "Closest" sort genuinely
+    reorders results around a lat/lon point - used for a "plain" search,
+    which has no AI ranking of its own (see marketplaces._blocket_fetch)."""
+    match = [matchers.query_param_matcher({
+        "q": "förstärkare", "cg": blocket.DEFAULT_CATEGORY, "sc": blocket.DEFAULT_SUB_CATEGORY,
+        "sort": "CLOSEST", "page": "1", "lat": "65.80823", "lon": "21.67276",
+    })]
+    responses.add(
+        responses.GET, blocket.SEARCH_URL, status=200,
+        json={"docs": [{"ad_id": 1, "heading": "Vitus Ri-101", "distance": 1.42}]},
+        match=match,
+    )
+
+    listings = blocket.fetch("förstärkare", sort_by_distance_from=(65.80823, 21.67276), max_pages=1)
+
+    assert len(listings) == 1
+    assert listings[0].distance_km == 1.42
+
+
+@responses.activate
+def test_fetch_omits_distance_km_when_not_sorting_by_distance():
+    responses.add(
+        responses.GET, blocket.SEARCH_URL, status=200,
+        json={"docs": [{"ad_id": 1, "heading": "Vitus Ri-101", "distance": 0}]},
+        match=_search_match("förstärkare", page=1),
+    )
+
+    listings = blocket.fetch("förstärkare", max_pages=1)
+
+    assert listings[0].distance_km is None
+
+
+@responses.activate
 def test_fetch_omits_location_param_when_not_given():
     responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200, match=_search_match("onkyo", page=1))
 

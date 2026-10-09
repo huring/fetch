@@ -40,8 +40,8 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             INSERT INTO listings (
                 search_id, source, external_id, title, description, url,
-                price, lowest_price, location, ships, auction_ends_at, image_url, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                price, lowest_price, location, ships, auction_ends_at, image_url, distance_km, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 search_id,
@@ -56,6 +56,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 None if listing.ships is None else int(listing.ships),
                 auction_ends_at,
                 listing.image_url,
+                listing.distance_km,
                 json.dumps(listing.raw),
             ),
         )
@@ -75,7 +76,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             UPDATE listings SET
                 title = ?, description = ?, url = ?, price = ?, lowest_price = ?,
-                location = ?, ships = ?, auction_ends_at = ?, image_url = ?, raw_json = ?, last_seen_at = datetime('now'),
+                location = ?, ships = ?, auction_ends_at = ?, image_url = ?, distance_km = ?, raw_json = ?, last_seen_at = datetime('now'),
                 score = NULL, reasoning = NULL, uncertain_specs = '[]', price_assessment = NULL,
                 notified_instant_at = NULL, included_in_digest_at = NULL
             WHERE id = ?
@@ -90,6 +91,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 None if listing.ships is None else int(listing.ships),
                 auction_ends_at,
                 listing.image_url,
+                listing.distance_km,
                 json.dumps(listing.raw),
                 listing_id,
             ),
@@ -99,7 +101,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             UPDATE listings SET
                 title = ?, description = ?, url = ?, price = ?,
-                location = ?, ships = ?, auction_ends_at = ?, image_url = ?, raw_json = ?, last_seen_at = datetime('now')
+                location = ?, ships = ?, auction_ends_at = ?, image_url = ?, distance_km = ?, raw_json = ?, last_seen_at = datetime('now')
             WHERE id = ?
             """,
             (
@@ -111,6 +113,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 None if listing.ships is None else int(listing.ships),
                 auction_ends_at,
                 listing.image_url,
+                listing.distance_km,
                 json.dumps(listing.raw),
                 listing_id,
             ),
@@ -340,12 +343,21 @@ def get_search_bucket_counts(
     }
 
 
+# Within a score tier (plain-surfaced listings all share score -1, so this is
+# the only ordering that applies to them), a listing with a known distance
+# from home sorts closest-first, the same way Blocket's own "Closest" filter
+# would (see marketplaces._blocket_fetch) - a listing with no distance (not
+# fetched with that sort, or from a marketplace that doesn't support it)
+# falls back to newest-first, same as before this existed.
+_LISTING_ORDER_BY = "score DESC, distance_km IS NULL, distance_km ASC, first_seen_at DESC"
+
+
 def list_bucket_listings(
     conn: sqlite3.Connection, search_id: int, bucket: str, score_digest_min: int, score_instant_threshold: int
 ) -> List[sqlite3.Row]:
     predicate = _bucket_predicate(bucket, score_digest_min, score_instant_threshold)
     return conn.execute(
-        f"SELECT * FROM listings WHERE search_id = ? AND {predicate} ORDER BY score DESC, first_seen_at DESC",
+        f"SELECT * FROM listings WHERE search_id = ? AND {predicate} ORDER BY {_LISTING_ORDER_BY}",
         (search_id,),
     ).fetchall()
 
@@ -379,7 +391,7 @@ def list_feed_listings(
     if search_id is not None:
         query += " AND listings.search_id = ?"
         params.append(search_id)
-    query += " ORDER BY listings.score DESC, listings.first_seen_at DESC"
+    query += " ORDER BY listings.score DESC, listings.distance_km IS NULL, listings.distance_km ASC, listings.first_seen_at DESC"
     return conn.execute(query, params).fetchall()
 
 

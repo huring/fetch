@@ -4,6 +4,24 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed a plain Blocket search dropping most of its real matches, and
+  sorted plain-search results by distance** - reported live: a national
+  "Förstärkare" search only surfaced 22 ads, far fewer than the thousands
+  Blocket itself reports for that term. Root cause: Blocket's own search
+  matches a phrase anywhere in an ad (title or body), but its search-results
+  endpoint only ever returns the title - no body text - so a genuine match
+  identified only by model name (e.g. "Hegel H190", nowhere near the word
+  "förstärkare") was being rejected by Fetch's own local relevance check
+  before ever getting the enrichment step that fetches the ad's real
+  description, which only used to run for listings that already passed.
+  Fixed by retrying that one check with the full description fetched first,
+  specifically (and only) when the sole reason a listing failed was a
+  missing phrase match - a hard reject (price, excluded word/model) still
+  skips straight to rejection, so this doesn't add cost there. Separately,
+  a plain search's results (which have no AI ranking of their own) are now
+  sorted the same way Blocket's own "Closest" filter would, assuming Lars's
+  own location (Boden, Norrbotten, configurable via new HOME_LAT/HOME_LON
+  settings) - both the fetch itself and the admin UI's display order.
 - **Fixed a "local" scope search silently finding nothing** - reported live:
   a Norrbotten-scoped "Ski-doo"/"Ski-doo Summit" search returned zero ads,
   despite the same search on blocket.se itself returning 9. Root cause: the

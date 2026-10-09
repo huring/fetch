@@ -11,6 +11,13 @@ from typing import List, Optional, Tuple
 from watcher.models import Search
 from watcher.wildcard import matches_any
 
+# Returned by passes_prefilter when none of the search phrases appear in the
+# text it was given - exported so pipeline._prefilter_pending_for_search can
+# tell this specific rejection apart from a hard one (price bounds, excluded
+# word/model) and retry with a fetched description before giving up (see its
+# docstring for why that retry matters for Blocket/Vinted specifically).
+NO_PHRASE_MATCH_REASON = "Title/description doesn't mention any word from the search phrases"
+
 
 def _phrase_words(phrases: List[str]) -> List[str]:
     words: List[str] = []
@@ -39,7 +46,7 @@ def passes_prefilter(
         # If the title/description contains none of the words we searched
         # for, it's almost certainly that kind of noise, not a genuine hit
         # using different terminology.
-        return False, "Title/description doesn't mention any word from the search phrases"
+        return False, NO_PHRASE_MATCH_REASON
 
     excluded = matches_any(text, search.excluded_models)
     if excluded:

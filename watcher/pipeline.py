@@ -41,7 +41,7 @@ from watcher.models import Listing, MarketplaceConfig, Search
 from watcher.notify import slack
 from watcher.scoring import claude_scorer
 from watcher.scoring.claude_scorer import estimate_cost_usd
-from watcher.scoring.prefilter import passes_prefilter
+from watcher.scoring.prefilter import NO_PHRASE_MATCH_REASON, passes_prefilter
 from watcher.settings import Settings
 from watcher.sources.base import SourceError
 from watcher.sources.blocket_geo import COUNTY_MUNICIPALITIES
@@ -142,29 +142,60 @@ def _fetch_for_search(
     return {"attempts": attempts, "errors": errors, "items_fetched": items_fetched, "total_fetched": total_fetched}
 
 
+def _enrich_description(conn: sqlite3.Connection, row_marketplace: Marketplace, row: sqlite3.Row) -> Optional[str]:
+    """Fetches and persists a listing's full description from its own detail
+    page, for a marketplace whose search results don't include one (Blocket,
+    Vinted - see their adapters). Returns the fetched description, or None if
+    there was nothing to fetch or it came back empty."""
+    if row_marketplace.enrich_description is None or row["description"]:
+        return None
+    description = row_marketplace.enrich_description(row["url"])
+    row_config = marketplace_configs_repo.get_config(conn, row["source"])
+    if row_config is not None:
+        time.sleep(row_config.request_delay_seconds)
+    if not description:
+        return None
+    storage.update_description(conn, row["id"], description)
+    return description
+
+
 def _prefilter_pending_for_search(conn: sqlite3.Connection, settings: Settings, search: Search, dry_run: bool) -> int:
     """Prefilters every currently-pending listing for one search, regardless
     of which marketplace fetched it. Each row's enrichment (if any) is
     looked up from its own `source` rather than assumed to match whichever
     marketplace most recently fetched for this search - a search can be
     attached to more than one marketplace, and get_pending_listings returns
-    every still-pending row for the search, not just ones from one of them."""
+    every still-pending row for the search, not just ones from one of them.
+
+    A listing that fails only on phrase relevance gets one retry with its
+    full description fetched first, before being rejected outright -
+    confirmed live (2026-10) as a real bug otherwise: Blocket's own search
+    (and Vinted's) genuinely matches a phrase somewhere in the ad, but its
+    search-results endpoint returns title only, no description - so a
+    listing whose title alone doesn't happen to mention the phrase (e.g. an
+    amp identified only by model name, "Hegel H190") was being rejected on
+    exactly the data gap enrichment exists to fill, never getting the chance
+    to look at the full ad text that's the actual reason it matched."""
     total_pending = 0
     pending_rows = storage.get_pending_listings(conn, search.id)
     for row in pending_rows:
+        row_marketplace = get_marketplace(row["source"])
         ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
+
+        if not ok and reason == NO_PHRASE_MATCH_REASON and row_marketplace is not None:
+            description = _enrich_description(conn, row_marketplace, row)
+            if description:
+                row = dict(row)
+                row["description"] = description
+                ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
+
         if not ok:
             storage.mark_prefiltered_out(conn, row["id"], reason)
             continue
 
-        row_marketplace = get_marketplace(row["source"])
-        if row_marketplace is not None and row_marketplace.enrich_description and not row["description"]:
-            description = row_marketplace.enrich_description(row["url"])
-            row_config = marketplace_configs_repo.get_config(conn, row["source"])
-            if row_config is not None:
-                time.sleep(row_config.request_delay_seconds)
+        if row_marketplace is not None:
+            description = _enrich_description(conn, row_marketplace, row)
             if description:
-                storage.update_description(conn, row["id"], description)
                 row = dict(row)
                 row["description"] = description
                 ok, reason = passes_prefilter(row["title"], row["description"], row["price"], search)
