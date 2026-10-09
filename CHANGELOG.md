@@ -4,6 +4,31 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Rebuilt the search builder's Claude-calling mechanism after the
+  schema-narrowing fix below still didn't resolve "wizard still not
+  working" live** - three straight rounds had gone into guessing what
+  Anthropic's structured-output mode ("Schema is too complex") was actually
+  counting (nesting, then field count), each guess only partially
+  confirmed, and a separate change (wrapping the call in a background job
+  for the 504 fix) had quietly started replacing every real error -
+  including this one, if it was still happening - with a single generic
+  "Something went wrong talking to Claude" message, so there was no way
+  left to tell what was actually failing without reading container logs by
+  hand. Rather than keep guessing: dropped Anthropic's structured-output
+  schema (`output_config.format=json_schema`) entirely for this feature.
+  Claude is now asked for a bare JSON object directly in the prompt and the
+  response text is parsed the same way any other text response in this
+  codebase is, with the same validate-and-retry-once behavior as before.
+  There's no schema left for the API to reject, so "Schema is too complex"
+  is now structurally impossible here, whatever was actually causing it.
+  Also collapsed the "decide, then finalize" two-call split back into one
+  call per turn - it existed only to work around the schema error, which is
+  moot now - and the wizard's error screen shows the real exception message
+  instead of a generic one, since this is a single-user admin tool with no
+  one to hide an error from. Still not verified against the real Anthropic
+  API from this environment (no key available here) - please try again and
+  tell me exactly what you see this time, error message included if there
+  is one.
 - **Narrowed what the search builder asks Claude to generate, after the
   schema-flattening fix still 400'd with the same "Schema is too complex"
   error** - the previous fix removed nesting but kept all ~20 fields, and

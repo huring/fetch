@@ -14,22 +14,20 @@ drives this loop turn by turn across page loads, carrying the transcript in
 a hidden form field - there's no server-side session/conversation state,
 consistent with the rest of this server-rendered (no JS) admin app.
 
-Each external "turn" is actually up to two Claude calls internally: a tiny
-"decide" call (ready to finalize, or what to ask) and, once ready, a
-separate "finalize" call that produces the draft. Both use structured
-output (client.messages.create with output_config.format - the same
-mechanism claude_scorer.py and price_watch.py already use), not Anthropic
-tool-use.
-
-Field count, not nesting, is what actually mattered for Anthropic's
-"Schema is too complex" 400 (confirmed live, 2026-10): the original
-20-field draft schema failed even after removing every nested object in
-favor of flat string lists, while price_watch.py's near-identical
-mechanism already works fine in production with a flat ~5-field schema.
-This version's draft schema has 4 fields - comfortably in that same
-working range. If a genuinely bigger schema is ever needed again, grow it
-incrementally and watch for this same error rather than assuming nesting
-is the risk.
+Each external turn is exactly one Claude call. This deliberately does NOT
+use the Messages API's structured-output mode (output_config.format=
+json_schema) - we spent three rounds (2026-10) chasing a live "Schema is
+too complex" 400 through that mode, first assuming nesting was the cause,
+then field count, cutting the draft schema down each time without ever
+being sure which one actually mattered (or whether it was really schema
+*size*, via the verbose per-field descriptions, all along) - a guessing
+game we have no way to settle without a live API key in the sandbox this
+runs in. Rather than keep guessing, this version asks Claude for a bare
+JSON object in the system prompt and parses the response text directly
+against the same Pydantic models, the same way every other text response
+in this codebase gets parsed. There's no schema for the API to reject, so
+this whole failure class is gone outright; `_call_with_retry` below already
+validates-and-retries-once on bad JSON, same as before.
 """
 from __future__ import annotations
 
@@ -41,7 +39,6 @@ from pydantic import BaseModel, Field
 
 from watcher.models import Search, WatchedModel
 from watcher.scoring.claude_scorer import estimate_cost_usd
-from watcher.scoring.schema import strict_json_schema
 from watcher.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -54,52 +51,29 @@ MAX_TOKENS = 2048
 MAX_QUESTION_ROUNDS = 4
 # Marks a search_phrases line as Claude's own comparable addition rather
 # than something the prompt asked for directly, optionally followed by
-# " - a short reason", e.g. "[suggested] Yamaha A-S301 - similar integrated amp".
-# Encoded this way (one field, not a separate suggested_phrases list) to
-# keep the draft schema's field count down - see module docstring.
+# " - a short reason", e.g. "[suggested] Yamaha A-S301 - similar integrated
+# amp". One field, not a separate suggested_phrases list, just to keep
+# things simple - see module docstring.
 SUGGESTED_PREFIX = "[suggested] "
 
 
 class AskUser(BaseModel):
-    question: str = Field(description="One clear question for the user, in the same language as their prompt.")
+    question: str
 
 
 class ProposeSearch(BaseModel):
-    summary: str = Field(
-        description="2-4 sentences, written for the user to read on a confirmation screen, explaining how "
-        "this search is configured and why - plain language, not a restatement of the raw fields."
-    )
-    name: str = Field(description="A short, human-readable name for this search.")
-    scoring_mode: Literal["plain", "rated"] = Field(
-        description="'rated': hard_criteria/soft_criteria/watched_models below are used to score and reason "
-        "about every match - use whenever the prompt expresses a quality judgement, preference, or a target "
-        "to compare against. 'plain': a simple list with no AI judgement at all - use for a bare 'show me "
-        "everything matching X', and leave hard_criteria/soft_criteria/watched_models empty in that case."
-    )
-    search_phrases: List[str] = Field(
-        description="At least one, one per line. Each is either exactly what the prompt asked for, or - if "
-        f"you're adding a comparable option beyond what was explicitly asked (e.g. another brand/model with "
-        f'a similar spec) - prefixed "{SUGGESTED_PREFIX}" plus " - a short reason", e.g. "Marantz PM6007" or '
-        f'"{SUGGESTED_PREFIX}Yamaha A-S301 - similar integrated amp, same price bracket". Only add a '
-        "suggested one when it's genuinely useful and the prompt didn't already say whether to include "
-        "alternatives - see the system prompt."
-    )
-    watched_models: List[str] = Field(
-        default_factory=list,
-        description="Rated mode only, usually empty. One line per watched model: "
-        '"pattern | note | good price | ideal" - the last part is the literal word "ideal" only for the '
-        "single buy-it-now/grail target if the prompt describes one (a match at or below its good price "
-        "scores 10/10 and becomes the benchmark everything else is judged against), omitted otherwise, e.g. "
-        '"TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK |" or "RTX 4080 | the one I actually want | 7000-8000 SEK | ideal".',
-    )
-    hard_criteria: List[str] = Field(default_factory=list, description="Rated mode only: requirements a match must satisfy, free text, one per line.")
-    soft_criteria: List[str] = Field(default_factory=list, description="Rated mode only: nice-to-haves that boost score without disqualifying, one per line.")
+    summary: str
+    name: str
+    scoring_mode: Literal["plain", "rated"]
+    search_phrases: List[str]
+    watched_models: List[str] = Field(default_factory=list)
+    hard_criteria: List[str] = Field(default_factory=list)
+    soft_criteria: List[str] = Field(default_factory=list)
 
 
 class BuilderTurn(BaseModel):
-    """The builder's result for one external turn - never sent to or
-    received from Claude directly as a single schema (see module docstring);
-    run_turn constructs this from whichever of the two internal calls ran."""
+    """The builder's result for one external turn - exactly what Claude's
+    response text is parsed into (see module docstring)."""
     action: Literal["ask_user", "propose_search"]
     ask_user: Optional[AskUser] = None
     propose_search: Optional[ProposeSearch] = None
@@ -111,30 +85,27 @@ class SearchBuilderError(Exception):
     rather than a 500, since a single bad call shouldn't be a crash."""
 
 
-class _Decision(BaseModel):
-    ready_to_finalize: bool = Field(
-        description="True once there's enough information to propose a complete search - most prompts "
-        "should resolve immediately. False only when genuinely blocked or offering something non-trivial "
-        "the prompt didn't address (see the system prompt's guidance on when to ask)."
-    )
-    question: Optional[str] = Field(
-        default=None, description="Required when ready_to_finalize is False: one clear question for the user, in the same language as their prompt. Null otherwise."
-    )
-
-
-_DECISION_SCHEMA = strict_json_schema(_Decision.model_json_schema())
-_PROPOSE_SCHEMA = strict_json_schema(ProposeSearch.model_json_schema())
-
-
 def _system_prompt() -> str:
     return (
         "You are helping configure a search for Fetch, a personal secondhand-marketplace watcher, from a "
         "free-text request (most likely Swedish). You only ever produce: a name, whether this should be "
         "AI-rated or a plain list, the search phrases to run, and (rated mode only) watched models and "
         "hard/soft criteria - every other setting (location, price limits, which marketplaces, etc.) is "
-        "configured separately afterward, not by you. You'll be asked, separately, whether you're ready to "
-        "finalize (and if not, what to ask) and then to actually produce the finished draft - never partial "
-        "fields or placeholders either way.\n\n"
+        "configured separately afterward, not by you.\n\n"
+        "Respond with ONLY a single JSON object - no markdown code fences, no text before or after it - in "
+        "exactly this shape:\n"
+        "{\n"
+        '  "action": "ask_user" or "propose_search",\n'
+        '  "ask_user": {"question": "..."} or null,\n'
+        '  "propose_search": {\n'
+        '    "summary": "...", "name": "...", "scoring_mode": "plain" or "rated",\n'
+        '    "search_phrases": ["...", ...], "watched_models": ["...", ...],\n'
+        '    "hard_criteria": ["...", ...], "soft_criteria": ["...", ...]\n'
+        "  } or null\n"
+        "}\n"
+        'Use "ask_user" with propose_search set to null when you need to ask something first. Use '
+        '"propose_search" with ask_user set to null once you have enough to finalize. Never fill in both, '
+        "or neither.\n\n"
         "When to ask vs. just proceed: ask only when genuinely blocked (the prompt is contradictory, or a "
         "choice meaningfully changes the result and there's no reasonable default) or when you want to offer "
         "something non-trivial the prompt didn't address - most commonly, suggesting comparable/similar "
@@ -143,24 +114,30 @@ def _system_prompt() -> str:
         "asked for. If the prompt clearly wants only that one specific item (e.g. \"I already have everything "
         "else, just need exactly this part\"), don't suggest alternatives at all. Otherwise, use a sensible "
         "default and proceed rather than asking - most prompts should resolve in one turn.\n\n"
-        "Field guidance beyond what's in the schema itself:\n"
+        "Field guidance:\n"
         "- scoring_mode: 'rated' whenever the prompt expresses a preference, quality bar, or a specific "
         "target to judge other listings against; 'plain' for a bare 'show me everything matching X' - in "
         "that case leave watched_models/hard_criteria/soft_criteria empty, they're not used.\n"
-        "- summary: a few plain-language sentences for a human reading a confirmation screen, not a JSON "
-        "dump - it's fine (and worth doing) to mention that location/price/marketplace settings use "
-        "defaults they can adjust afterward, since you don't set those yourself."
+        "- search_phrases: at least one. Each is either exactly what the prompt asked for, or - if you're "
+        f'adding a comparable option beyond what was explicitly asked - prefixed "{SUGGESTED_PREFIX}" plus '
+        f'" - a short reason", e.g. "Marantz PM6007" or "{SUGGESTED_PREFIX}Yamaha A-S301 - similar integrated '
+        'amp, same price bracket".\n'
+        "- watched_models: rated mode only, usually empty. One string per watched model: "
+        '"pattern | note | good price | ideal" - the last part is the literal word "ideal" only for the '
+        "single buy-it-now/grail target if the prompt describes one (a match at or below its good price "
+        "scores 10/10 and becomes the benchmark everything else is judged against), omitted otherwise, e.g. "
+        '"TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK |" or "RTX 4080 | the one I actually want | '
+        '7000-8000 SEK | ideal".\n'
+        "- hard_criteria / soft_criteria: rated mode only, free text, one requirement or nice-to-have per "
+        "string.\n"
+        "- summary: 2-4 plain-language sentences for a human reading a confirmation screen, not a JSON dump "
+        "- it's fine (and worth doing) to mention that location/price/marketplace settings use defaults they "
+        "can adjust afterward, since you don't set those yourself."
     )
 
 
-def _call(client: Anthropic, model: str, system: str, messages: List[Dict[str, str]], schema: Dict[str, Any]) -> Any:
-    return client.messages.create(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        system=system,
-        messages=messages,
-        output_config={"format": {"type": "json_schema", "schema": schema}},
-    )
+def _call(client: Anthropic, model: str, system: str, messages: List[Dict[str, str]]) -> Any:
+    return client.messages.create(model=model, max_tokens=MAX_TOKENS, system=system, messages=messages)
 
 
 def _log_usage(conn, settings: Settings, message: Any) -> None:
@@ -174,31 +151,42 @@ def _text_of(message: Any) -> Optional[str]:
     return next((block.text for block in message.content if getattr(block, "type", None) == "text"), None)
 
 
+def _extract_json_object(text: str) -> str:
+    """Claude is asked for a bare JSON object but may still wrap it in a
+    markdown code fence or add a stray word around it - slicing from the
+    first "{" to the last "}" strips any of that without needing to know
+    which, if either, is actually present."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return text
+    return text[start : end + 1]
+
+
 def _call_with_retry(
     conn, client: Anthropic, settings: Settings, system: str, messages: List[Dict[str, str]],
-    schema: Dict[str, Any], model_cls: type, label: str,
-) -> BaseModel:
-    """Calls Claude with the given schema, retrying once (with the parse
-    error fed back) if the response isn't valid JSON matching model_cls.
-    Raises SearchBuilderError if it still isn't valid after that retry."""
+) -> BuilderTurn:
+    """Calls Claude, retrying once (with the parse error fed back) if the
+    response isn't valid JSON matching BuilderTurn. Raises SearchBuilderError
+    if it still isn't valid after that retry."""
     current_messages = list(messages)
     for attempt in range(2):
-        message = _call(client, settings.claude_model, system, current_messages, schema)
+        message = _call(client, settings.claude_model, system, current_messages)
         _log_usage(conn, settings, message)
         text = _text_of(message)
         if text is not None:
             try:
-                return model_cls.model_validate_json(text)
+                return BuilderTurn.model_validate_json(_extract_json_object(text))
             except Exception as exc:
-                logger.warning("Search builder %s call returned invalid JSON (attempt %d): %s", label, attempt + 1, exc)
+                logger.warning("Search builder call returned invalid JSON (attempt %d): %s", attempt + 1, exc)
                 current_messages = current_messages + [
                     {"role": "assistant", "content": text},
-                    {"role": "user", "content": f"That response was invalid: {exc}. Respond again, valid JSON only."},
+                    {"role": "user", "content": f"That response was invalid: {exc}. Respond again with ONLY the JSON object, no other text."},
                 ]
                 continue
-        logger.warning("Search builder %s call had no text content block (attempt %d)", label, attempt + 1)
+        logger.warning("Search builder call had no text content block (attempt %d)", attempt + 1)
 
-    raise SearchBuilderError(f"Claude could not produce a valid response for this prompt after a retry ({label}).")
+    raise SearchBuilderError("Claude could not produce a valid response for this prompt after a retry.")
 
 
 def run_turn(
@@ -208,27 +196,18 @@ def run_turn(
     transcript (a list of {"role": "user"|"assistant", "content": ...}
     dicts - an assistant turn's content is the JSON text of its own
     previous BuilderTurn, so Claude can read back what it already
-    asked/proposed). Internally this may be one or two Claude calls (see
-    module docstring); externally it's always exactly one BuilderTurn, or a
-    SearchBuilderError if a call can't be turned into a valid result even
-    after its own retry."""
-    system = _system_prompt()
-
-    if not force_propose:
-        decision = _call_with_retry(conn, client, settings, system, transcript, _DECISION_SCHEMA, _Decision, "decide")
-        if not decision.ready_to_finalize:
-            return BuilderTurn(action="ask_user", ask_user=AskUser(question=decision.question or "Can you say more about what you're looking for?"))
-        finalize_messages = transcript + [
-            {"role": "assistant", "content": decision.model_dump_json()},
-            {"role": "user", "content": "Go ahead and propose the full search now."},
+    asked/proposed). Exactly one Claude call; raises SearchBuilderError if
+    it can't be turned into a valid result even after its own retry."""
+    messages = list(transcript)
+    if force_propose:
+        messages = messages + [
+            {
+                "role": "user",
+                "content": 'Please finalize the search now - use your best judgement for anything still '
+                'unresolved. Respond with action "propose_search", not a question.',
+            }
         ]
-    else:
-        finalize_messages = transcript + [
-            {"role": "user", "content": "Please finalize the search now - use your best judgement for anything still unresolved."},
-        ]
-
-    draft = _call_with_retry(conn, client, settings, system, finalize_messages, _PROPOSE_SCHEMA, ProposeSearch, "finalize")
-    return BuilderTurn(action="propose_search", propose_search=draft)
+    return _call_with_retry(conn, client, settings, _system_prompt(), messages)
 
 
 class ParsedPhrase(NamedTuple):

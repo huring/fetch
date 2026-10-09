@@ -250,11 +250,17 @@ def create_app(settings: Optional[Settings] = None, *, start_background_jobs: bo
                     context = build_wizard_turn_context(
                         scheduler_conn, app.state.client, settings, search_id, transcript
                     )
-                except Exception:
+                except Exception as exc:
                     logger.exception("Search builder turn failed for job %s", job_id)
+                    # The real exception, not a generic message - this is a
+                    # single-user admin tool, not a public product, so
+                    # there's no one to hide an error from, and hiding it
+                    # (2026-10) is what turned "still getting the same 400"
+                    # into an undebuggable "still not working" with nothing
+                    # to go on short of reading container logs by hand.
                     context = {
                         "stage": "error", "search_id": search_id,
-                        "error": "Something went wrong talking to Claude - please try again.",
+                        "error": f"{type(exc).__name__}: {exc}",
                     }
                 app.state.wizard_jobs[job_id] = {"status": "done", "context": context}
 
