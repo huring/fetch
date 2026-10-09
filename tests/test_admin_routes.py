@@ -188,7 +188,7 @@ def test_searches_list_shows_overview_panel(client):
     assert "Overview test item" in response.text  # shows up in "Top ads"
 
 
-def test_feed_shows_daily_roundup_by_default(client):
+def test_feed_shows_yes_and_maybe_by_default(client):
     from watcher import searches, storage
     from watcher.models import Listing
 
@@ -210,13 +210,29 @@ def test_feed_shows_daily_roundup_by_default(client):
             published_at=None, raw={},
         ),
     )
+    found_id = storage.upsert_listing(
+        conn, search.id,
+        Listing(
+            source="blocket", external_id="f3", title="Just found item", description="",
+            price=100, url="https://example.com/f3", location=None, ships=True,
+            published_at=None, raw={},
+        ),
+    )
     storage.mark_scored(conn, roundup_id, 6, "r", [], "p")
     storage.mark_scored(conn, alert_id, 9, "r", [], "p")
+    storage.mark_scored(conn, found_id, 2, "r", [], "p")
 
+    # Default view combines "Yes!" and "Maybe" (backlog feedback, 2026-10-09 -
+    # a plain "Maybe" default buried genuinely great matches one click deep).
     response = client.get("/feed")
     assert response.status_code == 200
     assert "Roundup item" in response.text
-    assert "Alert item" not in response.text
+    assert "Alert item" in response.text
+    assert "Just found item" not in response.text
+
+    maybe_response = client.get("/feed?bucket=daily_roundup")
+    assert "Roundup item" in maybe_response.text
+    assert "Alert item" not in maybe_response.text
 
     alert_response = client.get("/feed?bucket=instant_alert")
     assert "Alert item" in alert_response.text

@@ -397,6 +397,9 @@ def clear_listing_feedback(conn: sqlite3.Connection, listing_id: int) -> None:
     conn.commit()
 
 
+FEED_BUCKETS = ("yes_and_maybe", "daily_roundup", "instant_alert")
+
+
 def list_feed_listings(
     conn: sqlite3.Connection,
     bucket: str,
@@ -406,16 +409,32 @@ def list_feed_listings(
 ) -> List[sqlite3.Row]:
     """Like list_bucket_listings, but across every search at once (optionally
     narrowed to one) rather than one search at a time - the cross-search feed
-    (backlog item 17)."""
-    predicate = _bucket_predicate(bucket, score_digest_min, score_instant_threshold)
-    # "daily_roundup"/"instant_alert" only make sense for a currently rated
-    # search - without this, a search switched from rated to plain can keep
-    # surfacing its old high-scored listings here forever, since
-    # update_search never touches existing listings' scores (same bug as
-    # get_top_listings, see its docstring). "found" deliberately stays
-    # unscoped - it's meant to include both rated and plain-surfaced matches.
-    if bucket in ("daily_roundup", "instant_alert"):
-        predicate += " AND searches.scoring_mode = 'rated'"
+    (backlog item 17). "yes_and_maybe" (the feed's default) combines the
+    "Yes!"/"Maybe" buckets into one list, ordered tier-first (every "Yes!"
+    listing before any "Maybe" one) and by distance from home within each
+    tier, rather than by score - Lars cares more about "closest genuinely
+    good option" than fine-grained score ordering once something's already
+    cleared the "Maybe" bar."""
+    if bucket == "yes_and_maybe":
+        yes_predicate = _bucket_predicate("instant_alert", score_digest_min, score_instant_threshold)
+        maybe_predicate = _bucket_predicate("daily_roundup", score_digest_min, score_instant_threshold)
+        predicate = f"(({yes_predicate}) OR ({maybe_predicate})) AND searches.scoring_mode = 'rated'"
+        order_by = (
+            f"CASE WHEN listings.score >= {score_instant_threshold} THEN 0 ELSE 1 END, "
+            "listings.distance_km IS NULL, listings.distance_km ASC, listings.first_seen_at DESC"
+        )
+    else:
+        predicate = _bucket_predicate(bucket, score_digest_min, score_instant_threshold)
+        # "daily_roundup"/"instant_alert" only make sense for a currently
+        # rated search - without this, a search switched from rated to plain
+        # can keep surfacing its old high-scored listings here forever, since
+        # update_search never touches existing listings' scores (same bug as
+        # get_top_listings, see its docstring). "found" deliberately stays
+        # unscoped - it's meant to include both rated and plain-surfaced
+        # matches.
+        if bucket in ("daily_roundup", "instant_alert"):
+            predicate += " AND searches.scoring_mode = 'rated'"
+        order_by = "listings.score DESC, listings.distance_km IS NULL, listings.distance_km ASC, listings.first_seen_at DESC"
     query = f"""
         SELECT listings.*, searches.name AS search_name
         FROM listings
@@ -426,7 +445,7 @@ def list_feed_listings(
     if search_id is not None:
         query += " AND listings.search_id = ?"
         params.append(search_id)
-    query += " ORDER BY listings.score DESC, listings.distance_km IS NULL, listings.distance_km ASC, listings.first_seen_at DESC"
+    query += f" ORDER BY {order_by}"
     return conn.execute(query, params).fetchall()
 
 

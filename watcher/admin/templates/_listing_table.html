@@ -1,0 +1,48 @@
+{# Shared listing table rows for search_listings.html and feed.html, so a
+   listing looks and behaves identically whether reached via a search's own
+   bucket tabs or via the cross-search feed - same columns, same inline
+   like/not-interested feedback control. #}
+{% macro feedback_cell(l, dismiss_reasons, dismiss_reason_labels, return_to) %}
+{% if l.feedback == "liked" %}
+    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">&#128077; liked{% if l.feedback_detail %} &mdash; {{ l.feedback_detail }}{% endif %}</span>
+    <form method="post" action="/searches/{{ l.search_id }}/listings/{{ l.id }}/feedback" class="inline">
+        <input type="hidden" name="action" value="clear"><input type="hidden" name="return_to" value="{{ return_to }}">
+        <button type="submit" class="text-xs text-gray-400 hover:text-gray-200 ml-1">undo</button>
+    </form>
+{% elif l.feedback == "dismissed" %}
+    <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-300">not interested{% if l.feedback_reason %} &mdash; {{ dismiss_reason_labels.get(l.feedback_reason, l.feedback_reason) }}{% endif %}{% if l.feedback_detail %} ({{ l.feedback_detail }}){% endif %}</span>
+    <form method="post" action="/searches/{{ l.search_id }}/listings/{{ l.id }}/feedback" class="inline">
+        <input type="hidden" name="action" value="clear"><input type="hidden" name="return_to" value="{{ return_to }}">
+        <button type="submit" class="text-xs text-gray-400 hover:text-gray-200 ml-1">undo</button>
+    </form>
+{% else %}
+    <form method="post" action="/searches/{{ l.search_id }}/listings/{{ l.id }}/feedback" class="flex flex-wrap items-center gap-1">
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <select name="action" class="bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-xs">
+            <option value="like">&#128077; Like</option>
+            {% for key, label in dismiss_reasons %}
+            <option value="{{ key }}">&#128078; {{ label }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="detail" placeholder="detail (optional)" class="bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-xs w-28">
+        <button type="submit" class="text-xs text-indigo-300 hover:text-indigo-200">Save</button>
+    </form>
+{% endif %}
+{% endmacro %}
+
+{% macro listing_rows(listings, dismiss_reasons, dismiss_reason_labels, return_to, show_score, show_search, colspan) %}
+{% for l in listings %}
+    <tr>
+        <td class="px-3 py-2"><a href="{{ l.url }}" target="_blank" rel="noopener" class="text-indigo-300 hover:text-indigo-200">{{ l.title }}</a></td>
+        <td class="px-3 py-2">{{ l.price if l.price is not none else "-" }}</td>
+        {% if show_score %}<td class="px-3 py-2">{{ l.score if l.score is not none else "-" }}</td>{% endif %}
+        {% if show_search %}<td class="px-3 py-2">{{ l.search_name }}</td>{% endif %}
+        <td class="px-3 py-2">{{ l.source }}</td>
+        <td class="px-3 py-2">{{ l.age_days ~ " days" if l.age_days is not none else "-" }}</td>
+        <td class="px-3 py-2">{% if l.stale_notified_at %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-300">possible offer</span>{% endif %}</td>
+        <td class="px-3 py-2">{{ feedback_cell(l, dismiss_reasons, dismiss_reason_labels, return_to) }}</td>
+    </tr>
+{% else %}
+    <tr><td colspan="{{ colspan }}" class="px-3 py-6 text-center text-gray-400">Nothing here yet.</td></tr>
+{% endfor %}
+{% endmacro %}

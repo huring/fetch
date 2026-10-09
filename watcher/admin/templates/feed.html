@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_listing_table.html" as t %}
 {% block title %}Feed - Fetch{% endblock %}
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">Feed</h1>
@@ -7,6 +8,7 @@
     <label class="text-sm">
         <span class="block text-xs uppercase tracking-wide text-gray-400 mb-1">Showing</span>
         <select name="bucket" onchange="this.form.submit()" class="bg-gray-900 border border-gray-700 rounded-md px-3 py-1.5 text-gray-100">
+            <option value="yes_and_maybe" {{ "selected" if bucket == "yes_and_maybe" else "" }}>Yes! + Maybe</option>
             <option value="daily_roundup" {{ "selected" if bucket == "daily_roundup" else "" }}>Maybe</option>
             <option value="instant_alert" {{ "selected" if bucket == "instant_alert" else "" }}>Yes!</option>
         </select>
@@ -28,21 +30,11 @@
             <tr class="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
                 <th class="px-3 py-2">Title</th><th class="px-3 py-2">Price</th><th class="px-3 py-2">Score</th>
                 <th class="px-3 py-2">Search</th><th class="px-3 py-2">Source</th><th class="px-3 py-2">Active for</th>
+                <th class="px-3 py-2"></th><th class="px-3 py-2">Feedback</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-800">
-        {% for l in listings %}
-            <tr>
-                <td class="px-3 py-2"><a href="{{ l.url }}" target="_blank" rel="noopener" class="text-indigo-300 hover:text-indigo-200">{{ l.title }}</a></td>
-                <td class="px-3 py-2">{{ l.price if l.price is not none else "-" }}</td>
-                <td class="px-3 py-2">{{ l.score if l.score is not none else "-" }}</td>
-                <td class="px-3 py-2">{{ l.search_name }}</td>
-                <td class="px-3 py-2">{{ l.source }}</td>
-                <td class="px-3 py-2">{{ l.age_days ~ " days" if l.age_days is not none else "-" }}</td>
-            </tr>
-        {% else %}
-            <tr><td colspan="6" class="px-3 py-6 text-center text-gray-400">Nothing here yet.</td></tr>
-        {% endfor %}
+        {{ t.listing_rows(listings, dismiss_reasons, dismiss_reason_labels, return_to, true, true, 8) }}
         </tbody>
     </table>
 </div>

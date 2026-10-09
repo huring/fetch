@@ -168,6 +168,7 @@ def search_listings(request: Request, search_id: int, bucket: str = "found"):
             "bucket_labels": storage.BUCKET_LABELS,
             "listings": listings, "dismiss_reasons": feedback_taxonomy.DISMISS_REASONS,
             "dismiss_reason_labels": feedback_taxonomy.DISMISS_REASON_LABELS,
+            "return_to": f"/searches/{search_id}/listings?bucket={bucket}",
         },
     )
 
@@ -178,24 +179,31 @@ async def set_listing_feedback(request: Request, search_id: int, listing_id: int
     form_data = await request.form()
     action = form_data.get("action", "")
     detail = form_data.get("detail", "").strip()
-    bucket = form_data.get("bucket", "found")
-    if bucket not in storage.BUCKETS:
-        bucket = "found"
     if action == "clear":
         storage.clear_listing_feedback(conn, listing_id)
     elif action == "like":
         storage.set_listing_feedback(conn, listing_id, "liked", None, detail)
     elif action in feedback_taxonomy.DISMISS_REASON_KEYS:
         storage.set_listing_feedback(conn, listing_id, "dismissed", action, detail)
+    # return_to (the feed, or a search's own bucket tab) is wherever the
+    # feedback form was rendered from - see search_listings/feed below -
+    # falling back to the old fixed redirect for any caller that doesn't
+    # send one. Only a same-app relative path is ever honored.
+    return_to = form_data.get("return_to", "")
+    if return_to.startswith("/"):
+        return RedirectResponse(return_to, status_code=303)
+    bucket = form_data.get("bucket", "found")
+    if bucket not in storage.BUCKETS:
+        bucket = "found"
     return RedirectResponse(f"/searches/{search_id}/listings?bucket={bucket}", status_code=303)
 
 
 @router.get("/feed", response_class=HTMLResponse)
-def feed(request: Request, bucket: str = "daily_roundup", search_id: str = ""):
+def feed(request: Request, bucket: str = "yes_and_maybe", search_id: str = ""):
     conn = request.app.state.conn
     settings = request.app.state.settings
-    if bucket not in ("daily_roundup", "instant_alert"):
-        bucket = "daily_roundup"
+    if bucket not in storage.FEED_BUCKETS:
+        bucket = "yes_and_maybe"
     # The "All searches" <option> submits search_id="" (empty string, not
     # absent) - FastAPI would reject that against an Optional[int] param, so
     # it's taken as a plain string here and parsed by hand instead.
@@ -205,11 +213,17 @@ def feed(request: Request, bucket: str = "daily_roundup", search_id: str = ""):
     )
     listings = [dict(row, age_days=_age_days(row["first_seen_at"])) for row in rows]
     all_searches = searches_repo.list_searches(conn)
+    return_to = f"/feed?bucket={bucket}"
+    if selected_search_id is not None:
+        return_to += f"&search_id={selected_search_id}"
     return templates.TemplateResponse(
         request, "feed.html",
         {
-            "listings": listings, "bucket": bucket, "bucket_label": storage.BUCKET_LABELS[bucket],
+            "listings": listings, "bucket": bucket,
             "searches": all_searches, "selected_search_id": selected_search_id,
+            "dismiss_reasons": feedback_taxonomy.DISMISS_REASONS,
+            "dismiss_reason_labels": feedback_taxonomy.DISMISS_REASON_LABELS,
+            "return_to": return_to,
         },
     )
 

@@ -4,6 +4,21 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Unified the feed with a search's own listing view, added feedback there
+  too, defaulted it to "Yes! + Maybe", and ordered it by distance within each
+  tier** - reported live: the feed looked and behaved differently from
+  clicking into a search's own bucket (no like/not-interested controls, no
+  "possible offer" badge), only showed "Maybe" by default (burying genuinely
+  great "Yes!" matches a click away), and was ordered by score rather than by
+  what's actually closest. Both pages now render listing rows from one shared
+  template (`_listing_table.html`), so a listing looks and behaves
+  identically whichever way it's reached, including the feedback control
+  (its redirect now follows wherever the form was rendered from, so using it
+  from the feed stays on the feed instead of bouncing to the listing's own
+  search page). The feed's default view ("Yes! + Maybe", narrowable back to
+  either alone via the existing dropdown) is ordered tier-first - every
+  "Yes!" listing before any "Maybe" one - then by distance from home within
+  each tier, rather than by score.
 - **Added per-listing "like"/"not interested" feedback to the admin UI, plus
   a suggestion panel that turns it into search-config edits (was backlog
   #30)** - each listing in a search's listing table now has an inline
