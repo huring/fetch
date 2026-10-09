@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_listing_table.html" as t %}
 {% block title %}Searches - Fetch{% endblock %}
 {% block content %}
 <div class="flex items-center justify-between mb-6">
@@ -35,25 +36,28 @@
     <div class="text-xs uppercase tracking-wide text-gray-400 mb-2">Top ads <span class="normal-case text-gray-500">(the "Yes!" standouts)</span></div>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {% for l in top_listings %}
-        <a href="{{ l.url }}" target="_blank" rel="noopener" class="group bg-gray-800 border border-gray-700 rounded-lg overflow-hidden flex flex-col hover:border-gray-600">
-            {% if l.image_url %}
-            <img src="{{ l.image_url }}" alt="" class="w-full h-40 object-cover bg-gray-900">
-            {% else %}
-            <div class="w-full h-40 bg-gray-900 flex items-center justify-center text-gray-600 text-xs">No image</div>
-            {% endif %}
-            <div class="p-3 flex flex-col gap-1.5 flex-1">
-                <div class="flex items-start justify-between gap-2">
-                    <span class="text-sm font-medium text-gray-100 group-hover:text-indigo-300 line-clamp-2">{{ l.title }}</span>
-                    <span class="shrink-0 inline-flex px-2 py-0.5 rounded-full text-xs font-semibold bg-green-900 text-green-300">{{ l.score }}/10</span>
+        <div class="group bg-gray-800 border border-gray-700 rounded-lg overflow-hidden flex flex-col hover:border-gray-600">
+            <a href="{{ l.url }}" target="_blank" rel="noopener" class="flex flex-col flex-1">
+                {% if l.image_url %}
+                <img src="{{ l.image_url }}" alt="" class="w-full h-40 object-cover bg-gray-900">
+                {% else %}
+                <div class="w-full h-40 bg-gray-900 flex items-center justify-center text-gray-600 text-xs">No image</div>
+                {% endif %}
+                <div class="p-3 flex flex-col gap-1.5 flex-1">
+                    <div class="flex items-start justify-between gap-2">
+                        <span class="text-sm font-medium text-gray-100 group-hover:text-indigo-300 line-clamp-2">{{ l.title }}</span>
+                        <span class="shrink-0 inline-flex px-2 py-0.5 rounded-full text-xs font-semibold bg-green-900 text-green-300">{{ l.score }}/10</span>
+                    </div>
+                    {% if l.description %}<p class="text-xs text-gray-400 line-clamp-2">{{ l.description | truncate(140) }}</p>{% endif %}
+                    <div class="mt-auto pt-1 flex items-center justify-between text-xs text-gray-400">
+                        <span class="font-medium text-gray-200">{{ l.price if l.price is not none else "-" }}</span>
+                        <span>{{ l.platform_name }}{{ " · " ~ l.location if l.location else "" }}</span>
+                    </div>
+                    <div class="text-xs text-gray-500 truncate">{{ l.search_name }}</div>
                 </div>
-                {% if l.description %}<p class="text-xs text-gray-400 line-clamp-2">{{ l.description | truncate(140) }}</p>{% endif %}
-                <div class="mt-auto pt-1 flex items-center justify-between text-xs text-gray-400">
-                    <span class="font-medium text-gray-200">{{ l.price if l.price is not none else "-" }}</span>
-                    <span>{{ l.platform_name }}{{ " · " ~ l.location if l.location else "" }}</span>
-                </div>
-                <div class="text-xs text-gray-500 truncate">{{ l.search_name }}</div>
-            </div>
-        </a>
+            </a>
+            <div class="px-3 pb-3 text-xs">{{ t.feedback_cell(l, dismiss_reasons, dismiss_reason_labels, return_to) }}</div>
+        </div>
         {% endfor %}
     </div>
 </div>

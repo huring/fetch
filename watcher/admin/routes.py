@@ -139,6 +139,9 @@ def list_searches(request: Request, ran: Optional[int] = None):
         {
             "searches": all_searches, "counts": counts, "overview": overview, "top_listings": top_listings,
             "ran_search_name": ran_search_name,
+            "dismiss_reasons": feedback_taxonomy.DISMISS_REASONS,
+            "dismiss_reason_labels": feedback_taxonomy.DISMISS_REASON_LABELS,
+            "return_to": "/searches",
         },
     )
 

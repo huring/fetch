@@ -493,13 +493,20 @@ def get_top_listings(conn: sqlite3.Connection, score_instant_threshold: int, lim
     can keep surfacing its old high-scored listings here indefinitely, even
     though it's plain now and nothing has scored anything since - crowding
     out genuinely current standouts from searches that are actually rated
-    today."""
+    today.
+
+    Also excludes a listing dismissed via the admin UI's "not interested"
+    feedback (see watcher/feedback.py) - confirmed live, 2026-10, as a real
+    bug otherwise: a listing hidden from the feed/bucket views for exactly
+    that reason (too far away, no shipping, etc.) kept showing up here
+    regardless, since this query never looked at listings.feedback at all."""
     return conn.execute(
         """
         SELECT listings.*, searches.name AS search_name
         FROM listings
         JOIN searches ON searches.id = listings.search_id
         WHERE listings.score >= ? AND searches.scoring_mode = 'rated'
+          AND (listings.feedback IS NULL OR listings.feedback != 'dismissed')
         ORDER BY listings.score DESC, listings.first_seen_at DESC
         LIMIT ?
         """,

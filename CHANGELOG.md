@@ -4,6 +4,16 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed the front page's "Top ads" cards ignoring like/not-interested
+  feedback** - reported live: a "Yes!" listing dismissed as "not interested"
+  (too far away, wouldn't ship) stayed hidden everywhere else but kept
+  showing up as a "Top ad" on the searches page, since `get_top_listings`
+  never looked at `listings.feedback` at all. Now excludes a dismissed
+  listing the same way the feed/bucket views already did. Each card also
+  gets the same inline like/not-interested control as every other listing
+  view now (restructured the card so only the image/title link to the ad
+  itself - the feedback form sits below it rather than nested inside the
+  link).
 - **Unified the feed with a search's own listing view, added feedback there
   too, defaulted it to "Yes! + Maybe", and ordered it by distance within each
   tier** - reported live: the feed looked and behaved differently from

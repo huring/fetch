@@ -356,6 +356,22 @@ def test_get_top_listings_excludes_a_search_switched_from_rated_to_plain(conn, s
     assert [row["id"] for row in top] == [current_high]
 
 
+def test_get_top_listings_excludes_a_dismissed_listing(conn, search_id):
+    # Reported live (2026-10): a "Yes!" listing dismissed as "not
+    # interested" (too far away, no shipping, etc.) still showed up in the
+    # front page's "Top ads" cards, since this query never looked at
+    # listings.feedback at all.
+    keep = storage.upsert_listing(conn, search_id, make_listing(external_id="keep"))
+    dismissed = storage.upsert_listing(conn, search_id, make_listing(external_id="dismissed"))
+    storage.mark_scored(conn, keep, 9, "r", [], "p")
+    storage.mark_scored(conn, dismissed, 10, "r", [], "p")
+    storage.set_listing_feedback(conn, dismissed, "dismissed", "too_far", "")
+
+    top = storage.get_top_listings(conn, score_instant_threshold=8, limit=5)
+
+    assert [row["id"] for row in top] == [keep]
+
+
 def test_list_feed_listings_filters_by_bucket_and_search(conn, search_id):
     search_b = searches.create_search(conn, Search(name="Other search", scoring_mode="rated"))
     roundup_a = storage.upsert_listing(conn, search_id, make_listing(external_id="roundup-a"))
