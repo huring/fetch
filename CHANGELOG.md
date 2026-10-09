@@ -4,6 +4,19 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Vinted is now excluded by default from brand-new searches** - confirmed
+  live that every Vinted request (`/catalog` search and item pages) now
+  403s behind a genuine Cloudflare "managed challenge" (a JS computational
+  challenge our plain HTTP fetches can never pass), so a search that
+  includes it currently just logs repeated fetch failures for no benefit.
+  Added a `Marketplace.enabled_by_default` flag (true for everything else)
+  and a `default_marketplace_keys()` helper, used everywhere a brand-new
+  search previously defaulted to "every registered marketplace" - the
+  prompt wizard's new-search default and a watched item's linked "find
+  used" search. Vinted is still fully registered and can be turned back on
+  per-search via Advanced edit; existing searches that already have it
+  enabled are untouched. Added backlog #29 with the planned real fix
+  (FlareSolverr as a sidecar) for when that's worth doing.
 - **Rebuilt the search builder's Claude-calling mechanism after the
   schema-narrowing fix below still didn't resolve "wizard still not
   working" live** - three straight rounds had gone into guessing what

@@ -50,7 +50,7 @@ from pydantic import BaseModel, Field
 from watcher import searches as searches_repo
 from watcher import storage
 from watcher import watched_items as watched_items_repo
-from watcher.marketplaces import MARKETPLACES
+from watcher.marketplaces import default_marketplace_keys
 from watcher.models import Search, WatchedItem
 from watcher.notify import slack
 from watcher.scoring.claude_scorer import estimate_cost_usd
@@ -161,7 +161,7 @@ def _maybe_create_linked_search(conn, item: WatchedItem) -> None:
             name=f"Find used: {item.name}",
             scoring_mode="plain",
             search_phrases=[item.extracted_title],
-            marketplaces=list(MARKETPLACES.keys()),
+            marketplaces=default_marketplace_keys(),
             instant_alert_price=item.target_price,
         ),
     )

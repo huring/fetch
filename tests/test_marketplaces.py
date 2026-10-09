@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from watcher.marketplaces import MARKETPLACES, get as get_marketplace
+from watcher.marketplaces import MARKETPLACES, default_marketplace_keys, get as get_marketplace
 from watcher.models import MarketplaceConfig, Search
 from watcher.settings import Settings
 
@@ -36,6 +36,19 @@ def test_every_registered_marketplace_has_an_estimate_count_and_category_note():
     for marketplace in MARKETPLACES.values():
         assert marketplace.estimate_count is not None, marketplace.key
         assert marketplace.category_note, marketplace.key
+
+
+def test_vinted_is_excluded_from_default_marketplace_keys():
+    """Off by default (2026-10) since Vinted currently 403s on every
+    request behind a Cloudflare challenge (see backlog #29) - still a fully
+    registered, selectable marketplace, just not pre-selected for a
+    brand-new search."""
+    assert "vinted" not in default_marketplace_keys()
+    assert "vinted" in MARKETPLACES  # still registered and usable by hand
+
+
+def test_default_marketplace_keys_includes_every_other_marketplace():
+    assert set(default_marketplace_keys()) == set(MARKETPLACES) - {"vinted"}
 
 
 def test_blocket_estimate_count_uses_county_code_for_a_local_search():

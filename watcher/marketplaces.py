@@ -94,6 +94,13 @@ class Marketplace:
     # synth probably isn't on Rehifi), not to describe listings once fetched
     # (that's scoring_note's job).
     category_note: str = ""
+    # Whether a brand-new search - built via the prompt wizard, or a
+    # watched-item's linked "find used" search (see price_watch.py) - starts
+    # with this marketplace already included. True for everything except one
+    # that's currently broken (see Vinted below); still fully wired up and
+    # selectable by hand via Advanced edit either way, this only changes
+    # what's pre-selected for something new.
+    enabled_by_default: bool = True
 
 
 MARKETPLACES: Dict[str, "Marketplace"] = {}
@@ -105,6 +112,12 @@ def register(marketplace: Marketplace) -> None:
 
 def get(key: str) -> Optional[Marketplace]:
     return MARKETPLACES.get(key)
+
+
+def default_marketplace_keys() -> List[str]:
+    """Every marketplace a brand-new search should start out with, before
+    any user customization - see Marketplace.enabled_by_default."""
+    return [key for key, m in MARKETPLACES.items() if m.enabled_by_default]
 
 
 # --- Blocket -----------------------------------------------------------------
@@ -211,6 +224,13 @@ register(
         default_request_delay_seconds=2.0,
         enrich_description=_vinted_enrich_description,
         check_active=_vinted_check_active,
+        # Off by default for new searches (2026-10): Vinted now serves a
+        # Cloudflare "managed challenge" for every /catalog request
+        # (confirmed live - a plain HTTP fetch can never pass it, it needs
+        # real JS execution), so every fetch currently 403s. Still fully
+        # wired up and selectable via Advanced edit for whenever backlog
+        # #29 (FlareSolverr) or similar lands.
+        enabled_by_default=False,
     )
 )
 

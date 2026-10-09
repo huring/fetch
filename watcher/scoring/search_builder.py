@@ -262,10 +262,11 @@ def draft_to_search(draft: ProposeSearch, *, included_phrases: Optional[List[str
     rather than reset to blank defaults, since the draft was never asked to
     produce them and has no opinion on them either way. Omitted (a brand new
     search), those fields get the same default a fresh manual-form search
-    would, with marketplaces defaulting to every registered one."""
+    would, with marketplaces defaulting to every marketplace enabled by
+    default (see marketplaces.default_marketplace_keys)."""
     phrases = included_phrases if included_phrases is not None else all_draft_phrases(draft)
     watched_models = [m for m in (_parse_watched_model_line(line) for line in draft.watched_models) if m is not None]
-    search = base.model_copy(deep=True) if base is not None else Search(name=draft.name, marketplaces=_all_marketplace_keys())
+    search = base.model_copy(deep=True) if base is not None else Search(name=draft.name, marketplaces=_default_marketplace_keys())
     search.name = draft.name
     search.scoring_mode = draft.scoring_mode
     search.watched_models = watched_models
@@ -275,10 +276,10 @@ def draft_to_search(draft: ProposeSearch, *, included_phrases: Optional[List[str
     return search
 
 
-def _all_marketplace_keys() -> List[str]:
-    from watcher.marketplaces import MARKETPLACES
+def _default_marketplace_keys() -> List[str]:
+    from watcher.marketplaces import default_marketplace_keys
 
-    return list(MARKETPLACES.keys())
+    return default_marketplace_keys()
 
 
 def collapse_transcript_to_prompt(transcript: List[Dict[str, str]]) -> str:

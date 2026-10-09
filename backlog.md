@@ -60,3 +60,47 @@ When "Run now" is clicked, update the status-badge to a yellow "running" badge w
 ## 25. Delete items when searches are deleted
 When i remove a search, delete all the items associated whith that search as well. Keep the pricing info if there is any, incase i add the item later.
 
+## 26. UI when using wizard is really laggy
+The form for typing the prompt to create a search is really laggy and unresponsive.
+
+## 29. Fix Vinted via FlareSolverr
+Vinted now serves a real Cloudflare "managed challenge" (JS computational
+challenge) for every `/catalog` request - confirmed live (2026-10) via a
+direct curl: `403`, `cf-mitigated: challenge` header, and a "Please wait...
+enable JavaScript and cookies" interstitial instead of the server-rendered
+page `sources/vinted.py` parses. A plain `requests.get` can never pass this
+(no JS execution, no way to produce the `cf_clearance` cookie), so every
+Vinted fetch/count currently 403s regardless of search phrase. Dropped to
+`enabled_by_default=False` in `marketplaces.py` in the meantime - still
+fully wired up and selectable per-search via Advanced edit, just excluded
+from what a brand-new search starts with.
+
+Planned fix: add [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)
+(a small, widely-used proxy purpose-built for solving Cloudflare challenges
+with a real headless browser under the hood, returning the solved page +
+cookies over a simple JSON API) as a second container, rather than bundling
+a headless browser into this app's own image.
+
+Steps:
+1. Add a `flaresolverr/flaresolverr` service to `docker-compose.yml` (no
+   persistent volume needed; exposes its API on e.g. `:8191` internally,
+   not published externally).
+2. In `sources/vinted.py`, replace the direct `get_text(SEARCH_URL, ...)`
+   calls (in `fetch`, `count`, `fetch_item_description`, `check_active`)
+   with a POST to FlareSolverr's `/v1` endpoint
+   (`{"cmd": "request.get", "url": ..., "maxTimeout": 60000}`), parsing the
+   target page's HTML out of the JSON response's `solution.response`.
+   FlareSolverr's own `cmd: "sessions.create"`/`sessions.destroy` lets a
+   solved challenge's cookies be reused across the many calls one fetch
+   cycle makes, instead of re-solving per request - worth doing given how
+   many search phrases/pages run per cycle.
+3. Add a `FLARESOLVERR_URL` setting (e.g.
+   `http://flaresolverr:8191/v1`, matching the compose service name) to
+   `settings.py`, threaded down to `sources/vinted.py` the same way other
+   per-deployment config already is.
+4. Handle FlareSolverr itself being unreachable/slow the same way any other
+   source failure is handled today (`SourceError`, logged, cycle continues)
+   - it's an extra moving part that can itself go down.
+5. Once confirmed working live, flip `enabled_by_default=True` back on for
+   Vinted in `marketplaces.py` and remove this note's caveat from its
+   registration comment.

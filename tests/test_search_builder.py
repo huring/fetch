@@ -175,7 +175,7 @@ def test_all_draft_phrases_combines_explicit_and_suggested_in_order():
 
 
 def test_draft_to_search_flattens_all_phrases_by_default():
-    from watcher.marketplaces import MARKETPLACES
+    from watcher.marketplaces import default_marketplace_keys
 
     draft = ProposeSearch.model_validate_json(PROPOSE_SEARCH_JSON)
     search = draft_to_search(draft)
@@ -183,8 +183,9 @@ def test_draft_to_search_flattens_all_phrases_by_default():
     assert search.search_phrases == ["Marantz PM6007", "Yamaha A-S301"]
     assert search.scoring_mode == "rated"
     # Not a Claude-generated field (see module docstring) - defaults to
-    # every registered marketplace, adjustable afterward via Advanced edit.
-    assert set(search.marketplaces) == set(MARKETPLACES.keys())
+    # every marketplace enabled by default, adjustable afterward via
+    # Advanced edit.
+    assert set(search.marketplaces) == set(default_marketplace_keys())
 
 
 def test_draft_to_search_with_a_base_preserves_its_non_generated_fields():
