@@ -71,21 +71,23 @@ def no_real_marketplace_fetches():
 
 @pytest.fixture
 def client(tmp_path):
+    # start_background_jobs=False (backlog #22, fixed 2026-10-09): this file
+    # tests HTTP routes, not the scheduler - there's no reason for every one
+    # of its ~30 tests to spin up a real recurring tick/digest/liveness/
+    # price-watch job on its own background thread, each outliving its own
+    # test (scheduler.shutdown(wait=False) in the lifespan is deliberate - a
+    # slow job shouldn't hold up a real container's shutdown). That was the
+    # actual mechanism behind this file's long-documented intermittent
+    # flakiness, confirmed live - not fixable by patching individual
+    # symptoms (sleep timing, mock scope) when the real fix is for most of
+    # these tests to simply not run a background scheduler at all. The
+    # handful of tests that specifically click "Run now"/"Check now" still
+    # get a real (opt-in, single) background job via trigger_search_run/
+    # trigger_watched_item_check - those are unaffected by this flag.
     settings = make_settings(str(tmp_path / "test.db"))
-    app = create_app(settings)
+    app = create_app(settings, start_background_jobs=False)
     with TestClient(app) as test_client:
         yield test_client
-        # Cancels future recurring firings (the 5-min tick, daily jobs)
-        # immediately rather than waiting for the lifespan's own shutdown.
-        # Deliberately non-blocking - a wait=True here was tried and
-        # reverted, since it could hang indefinitely (APScheduler's shutdown
-        # join appears to deadlock against its own worker threads in this
-        # setup, not just wait a bounded, predictable amount of time). This
-        # narrows the remaining race (see no_real_marketplace_fetches above)
-        # without that risk, but doesn't close it completely - a residual,
-        # low-frequency flake is a known, accepted characteristic of testing
-        # a real background scheduler this way (see CLAUDE.md/this comment
-        # if it resurfaces).
         test_client.app.state.scheduler.remove_all_jobs()
 
 
@@ -610,21 +612,11 @@ def test_clear_data_removes_listings_keeps_searches(client):
     assert len(searches.list_searches(conn)) > 0
 
 
-def test_healthz_starting_when_no_runs(tmp_path):
-    # Deliberately not the shared `client` fixture: this test's whole premise
-    # is "no runs exist yet", but the scheduler's immediate startup tick (see
-    # create_app) races to create one on its own background thread - with
-    # the inter-phrase sleep mocked instant (see no_real_marketplace_fetches)
-    # that race is won often enough to make this flaky. Patching out
-    # run_marketplace_cycle itself removes the race instead of just
-    # narrowing it - no run can be created no matter how fast the tick fires.
-    settings = make_settings(str(tmp_path / "test.db"))
-    with patch("watcher.admin.app.run_marketplace_cycle", return_value={}):
-        app = create_app(settings)
-        with TestClient(app) as test_client:
-            response = test_client.get("/healthz")
-            test_client.app.state.scheduler.remove_all_jobs()
-
+def test_healthz_starting_when_no_runs(client):
+    # Now safe to use the shared fixture directly: it no longer starts any
+    # background job that could race to create a run before this assertion
+    # (see the client fixture's own comment - backlog #22).
+    response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["status"] == "starting"
 

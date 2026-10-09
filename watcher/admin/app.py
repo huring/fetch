@@ -58,7 +58,20 @@ def _is_due(config, now: datetime.datetime) -> bool:
     return (now - last) >= datetime.timedelta(minutes=config.poll_interval_minutes)
 
 
-def create_app(settings: Optional[Settings] = None) -> FastAPI:
+def create_app(settings: Optional[Settings] = None, *, start_background_jobs: bool = True) -> FastAPI:
+    """start_background_jobs=False skips scheduling the recurring jobs below
+    (tick/digest/liveness/price-watch) entirely - for tests that only
+    exercise HTTP routes and have no interest in the scheduler. Without it,
+    every one of those tests still spins up a real BackgroundScheduler whose
+    immediate startup tick (next_run_time=now()) runs on its own OS thread
+    outliving the test itself (scheduler.shutdown(wait=False) is deliberate -
+    a slow job shouldn't hold up a real container's shutdown) - confirmed
+    live (2026-10) as the actual mechanism behind this test file's
+    long-documented intermittent flakiness (backlog #22), not just a
+    theoretical risk. A manually-triggered run (trigger_search_run/
+    trigger_watched_item_check, used by the "Run now"/"Check now" buttons)
+    is unaffected either way - those are opt-in per test, not forced on
+    every single one regardless of what it's actually testing."""
     settings = settings or load_settings()
 
     @asynccontextmanager
@@ -200,11 +213,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         def trigger_watched_item_check(item_id: int) -> None:
             scheduler.add_job(_check_watched_item_now, args=[item_id], next_run_time=datetime.datetime.now())
 
-        scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
-        hour, minute = settings.digest_time.split(":")
-        scheduler.add_job(_digest_job, CronTrigger(hour=int(hour), minute=int(minute)))
-        scheduler.add_job(_liveness_job, CronTrigger(hour=LIVENESS_SWEEP_HOUR, minute=LIVENESS_SWEEP_MINUTE))
-        scheduler.add_job(_price_watch_job, CronTrigger(hour=PRICE_WATCH_HOUR, minute=PRICE_WATCH_MINUTE))
+        if start_background_jobs:
+            scheduler.add_job(_tick, "interval", minutes=TICK_INTERVAL_MINUTES, next_run_time=datetime.datetime.now())
+            hour, minute = settings.digest_time.split(":")
+            scheduler.add_job(_digest_job, CronTrigger(hour=int(hour), minute=int(minute)))
+            scheduler.add_job(_liveness_job, CronTrigger(hour=LIVENESS_SWEEP_HOUR, minute=LIVENESS_SWEEP_MINUTE))
+            scheduler.add_job(_price_watch_job, CronTrigger(hour=PRICE_WATCH_HOUR, minute=PRICE_WATCH_MINUTE))
         scheduler.start()
         app.state.scheduler = scheduler
         app.state.trigger_search_run = trigger_search_run

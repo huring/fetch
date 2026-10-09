@@ -27,32 +27,6 @@ The explicitly-deferred half of the watched-items "find used" feature - a genera
 ## 14. Admin UI access control
 There's currently zero auth on the admin UI. Low risk while it's only reachable inside the network via Portainer, but worth a basic password gate before it's ever exposed more broadly.
 
-## 15. Rename the project to "Fetch" - remaining manual steps
-Code-side rename is done (2026-10-09 - see CHANGELOG): README title/intro,
-`docker-compose.yml`'s image line, and the admin app's internal title all say
-"Fetch" now. What's left is outside what Claude can do from this environment
-(no `gh`/GitHub API access here) - on you:
-
-1. Rename the GitHub repo itself: Settings -> General -> Repository name,
-   `hifi-agent` -> `fetch`. GitHub keeps the old URL working as a redirect.
-2. Update your local clone's remote so it points at the new URL directly
-   rather than relying on the redirect: `git remote set-url origin
-   https://github.com/huring/fetch.git`.
-3. Push (or re-run the Actions workflow) once renamed - it'll build and push
-   to `ghcr.io/huring/fetch:latest` automatically (the tag is derived from
-   `github.repository`, no workflow edit needed). The old
-   `ghcr.io/huring/hifi-agent` package is **not** renamed or redirected - it's
-   a separate, now-orphaned package that keeps existing until you delete it
-   by hand (GitHub -> your profile -> Packages).
-4. The new `fetch` package likely starts **private** by default regardless of
-   what visibility the old one had - if you want to skip configuring a
-   registry PAT in Portainer (see README step 4), set it to public: the new
-   package's own page -> Settings -> Danger Zone -> Change visibility.
-5. In Portainer, update the stack's Git repository URL to the new `fetch`
-   URL (works via the redirect either way, but cleaner not to depend on it
-   long-term), and rename the stack itself if you want its display name to
-   match - plan for a brief redeploy once the new image is pullable.
-
 ## 20. New marketplace: Luleå Auktionsverk
 https://www.luleaauktionsverk.se/
 
@@ -83,16 +57,11 @@ expected state, not a failure (e.g. not tripping the source-health
 ## 21. Add prompt/NLP when creating new searches
 I want to be able to type into a prompt what i'm looking for, what my requirements are, and by using NLP infer what should go where in the search parameters, to create a new search.
 
-## 22. Known test-suite flakiness: source-adapter tests can occasionally fail from cross-test interference
-Found while adding the Auctionet adapter (2026-10-08): the admin app's background scheduler (test_admin_routes.py) fires real jobs on their own threads, and the production shutdown path is deliberately non-blocking (a slow job shouldn't hold up a container stop) - so a thread can still be mid-fetch when its test function returns. If that straggler reaches the network while an unrelated, later test's `@responses.activate` happens to be active, it can get matched against mocks meant for that other test and break it in a confusing, hard-to-reproduce way (full-suite run shows this roughly 1-in-8 times; every affected test passes reliably in isolation).
-
-Already mitigated (not fully fixed): `no_real_marketplace_fetches` in test_admin_routes.py is module-scoped rather than per-test (closes most of the race), `tests/conftest.py` blocks real socket connections session-wide as a general safety net, and a couple of the most commonly affected tests were hardened to filter `responses.calls` by their own query string instead of assuming call-count/index.
-
-**Update (2026-10-09)**: the same underlying leaked-background-job issue turned out to also cause an outright interpreter segfault, not just mock cross-contamination - see CHANGELOG. That specific race (the shutdown path closing a connection a background job was still using) is now fixed. What's still open is unrelated and narrower: `responses.add()` as used throughout the blocket/vinted/rehifi/auctionet source-adapter tests matches by URL only, not query string, so a stray call with a *different* search phrase to the *same* endpoint can silently consume a mock meant for the test's own call. Properly fixing this means adding strict query-string matching (`responses.matchers.query_param_matcher` or equivalent) across all of those tests - a real but separate, bounded piece of work, not something to do as a side effect of another task.
-
 ## 24. Show status badge on searches page
 When "Run now" is clicked, update the status-badge to a yellow "running" badge while the search is running.
 
 ## 25. Delete items when searches are deleted
 When i remove a search, delete all the items associated whith that search as well. Keep the pricing info if there is any, incase i add the item later.
 
+## 28. Source-adapter tests match HTTP mocks by URL only, not query string
+Narrower remainder of the test-suite flakiness investigated 2026-10-08/09 (see CHANGELOG, was backlog #22) - the dominant cause (test_admin_routes.py's unnecessary per-test background scheduler) is fixed, but this piece is separate and still open: `responses.add()` as used throughout the blocket/vinted/rehifi/auctionet source-adapter tests matches by URL only, so a stray call with a *different* search phrase to the *same* endpoint (e.g. from one of the few remaining tests that does spin up a real background job via "Run now"/"Check now") can silently consume a mock meant for the test's own call, breaking it in a confusing, hard-to-reproduce way. Properly fixing this means adding strict query-string matching (`responses.matchers.query_param_matcher` or equivalent) across all of those tests - a real but bounded piece of work, not something to do as a side effect of another task.

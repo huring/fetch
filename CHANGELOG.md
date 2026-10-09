@@ -4,6 +4,36 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed the actual cause of test_admin_routes.py's intermittent CI
+  failures** (was backlog #22; CHANGELOG also already covers a segfault
+  fixed the same day from the same underlying mechanism) - confirmed live
+  when a CI run failed an assertion (`test_feed_shows_daily_roundup_by_default`)
+  that passed reliably in 10 straight local full-suite reruns, meaning it
+  really was the long-documented, timing-dependent cross-test interference,
+  not a code regression. Root cause: every one of this file's ~30 `client`
+  fixtures started a real BackgroundScheduler whose immediate startup tick
+  fires a real (if mocked) marketplace-fetch cycle on its own thread, well
+  beyond what a test exercising only HTTP routes has any use for - and
+  that thread outlives its own test by design (the production shutdown path
+  is deliberately non-blocking, so a slow job never holds up a real
+  container stop). `create_app()` now takes a `start_background_jobs` flag;
+  the shared `client` fixture passes `False`, so none of those ~30 tests
+  spin up a scheduler job at all unless they explicitly click "Run now" or
+  "Check now" (a handful still do, intentionally, to test that exact
+  behavior). Verified with 15 consecutive full-suite runs in a fresh Python
+  3.12 container (matching CI) - zero failures, where a run would
+  previously fail roughly 1 in 8. The separate, narrower `responses.add()`
+  query-string-matching gap in the source-adapter test files is still open,
+  split out as its own backlog #28.
+- **Renamed the project to "Fetch", end to end** (was backlog #15) - the
+  code-side rename landed earlier; Lars completed the remaining manual
+  pieces: the GitHub repo itself is renamed (old `hifi-agent` URL still
+  redirects), the local clone's remote points at the new URL directly, and
+  CI is confirmed publishing to `ghcr.io/huring/fetch:latest`. The Portainer
+  stack's own Git URL is deliberately left pointing at the old (redirecting)
+  URL rather than migrated - a conscious call, not an oversight, since the
+  redirect works fine for git operations too and re-pointing it would mean
+  re-entering every secret as a fresh stack.
 - **Reworked "Top ads" into a richer card grid, scoped to the "Yes!" bucket**
   - previously it was a bare title/score/price text list that could include
   "Maybe"-tier listings too if too few "Yes!" ones existed (it just took the
