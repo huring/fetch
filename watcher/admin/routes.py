@@ -303,7 +303,7 @@ def build_wizard_turn_context(
     return {
         "stage": "draft", "draft": draft, "draft_json": draft.model_dump_json(),
         "transcript_json": json.dumps(transcript), "counts": None, "name_error": None,
-        "name_value": draft.name, "checked_indices": set(range(len(draft.search_phrases))),
+        "name_value": draft.name, "checked_indices": set(range(len(search_builder.all_draft_phrases(draft)))),
         "search_id": search_id, "marketplace_names": _marketplace_names(),
     }
 
@@ -344,7 +344,7 @@ def _handle_draft_action(request: Request, form_data, search_id: Optional[int]) 
     draft = search_builder.ProposeSearch.model_validate_json(form_data.get("draft_json"))
     name = (form_data.get("name") or draft.name).strip() or draft.name
     checked_indices = {int(i) for i in form_data.getlist("phrase_included")}
-    included_phrases = [p.text for i, p in enumerate(draft.search_phrases) if i in checked_indices]
+    included_phrases = [p for i, p in enumerate(search_builder.all_draft_phrases(draft)) if i in checked_indices]
     transcript_json = form_data.get("transcript", "[]")
 
     search = search_builder.draft_to_search(draft, included_phrases=included_phrases)

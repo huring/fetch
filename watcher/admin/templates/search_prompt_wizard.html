@@ -103,12 +103,20 @@
         {% for p in draft.search_phrases %}
         <label class="flex items-start gap-2 text-sm text-gray-300 mt-2">
             <input type="checkbox" name="phrase_included" value="{{ loop.index0 }}" {{ "checked" if loop.index0 in checked_indices else "" }} class="w-4 h-4 mt-0.5 accent-indigo-500">
-            <span>
-                {{ p.text }}
-                {% if p.source == "suggested" %}<span class="ml-1 inline-flex px-1.5 py-0.5 rounded text-xs bg-indigo-900 text-indigo-300">suggested</span>{% if p.note %} <span class="text-gray-400">- {{ p.note }}</span>{% endif %}{% endif %}
-            </span>
+            <span>{{ p }}</span>
         </label>
         {% endfor %}
+        {% if draft.suggested_phrases %}
+        {% set explicit_count = draft.search_phrases | length %}
+        <p class="text-xs text-gray-400 mt-3">Claude's suggestions{% if draft.suggested_phrases_note %} - {{ draft.suggested_phrases_note }}{% endif %}</p>
+        {% for p in draft.suggested_phrases %}
+        {% set combined_index = explicit_count + loop.index0 %}
+        <label class="flex items-start gap-2 text-sm text-gray-300 mt-2">
+            <input type="checkbox" name="phrase_included" value="{{ combined_index }}" {{ "checked" if combined_index in checked_indices else "" }} class="w-4 h-4 mt-0.5 accent-indigo-500">
+            <span>{{ p }} <span class="ml-1 inline-flex px-1.5 py-0.5 rounded text-xs bg-indigo-900 text-indigo-300">suggested</span></span>
+        </label>
+        {% endfor %}
+        {% endif %}
     </fieldset>
 
     <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
@@ -140,9 +148,9 @@
         {% if draft.soft_criteria %}<p class="text-sm text-gray-300 mt-2"><span class="text-gray-400">Nice-to-haves:</span> {{ draft.soft_criteria | join("; ") }}</p>{% endif %}
         {% if draft.watched_models %}
         <div class="text-sm text-gray-300 mt-2">
-            <span class="text-gray-400">Watched models:</span>
+            <span class="text-gray-400">Watched models</span> <span class="text-xs text-gray-500">(pattern | note | good price | ideal)</span>:
             <ul class="list-disc list-inside">
-                {% for wm in draft.watched_models %}<li>{{ wm.pattern }}{% if wm.is_ideal %} <span class="text-xs text-indigo-300">(grail target)</span>{% endif %} - {{ wm.note }}{% if wm.good_price %}, good price: {{ wm.good_price }}{% endif %}</li>{% endfor %}
+                {% for wm in draft.watched_models %}<li>{{ wm }}</li>{% endfor %}
             </ul>
         </div>
         {% endif %}

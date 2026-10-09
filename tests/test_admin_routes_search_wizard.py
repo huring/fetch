@@ -65,38 +65,36 @@ def submit_wizard_turn(client, url, data, timeout=5):
     raise AssertionError(f"Wizard job at {status_url} did not finish within {timeout}s")
 
 
-ASK_USER_JSON = json.dumps({
-    "action": "ask_user",
-    "ask_user": {"question": "Vilken prisgräns vill du sätta?"},
-    "propose_search": None,
-})
+# run_turn makes up to two calls per external turn - a tiny "decide" call,
+# then (once ready) a separate "finalize" call for the actual draft (see
+# search_builder's module docstring: originally one combined call/schema,
+# split after that was confirmed live, 2026-10, to 400 with "Schema is too
+# complex" once the draft schema had nested arrays-of-objects alongside the
+# question schema in the same request).
+DECISION_ASK_JSON = json.dumps({"ready_to_finalize": False, "question": "Vilken prisgräns vill du sätta?"})
+DECISION_READY_JSON = json.dumps({"ready_to_finalize": True, "question": None})
 
 PROPOSE_SEARCH_JSON = json.dumps({
-    "action": "propose_search",
-    "ask_user": None,
-    "propose_search": {
-        "summary": "En AI-rankad sökning efter Marantz PM6007 och liknande förstärkare, max 3000 kr.",
-        "name": "Marantz PM6007",
-        "scope": "national",
-        "location": "",
-        "require_shipping": False,
-        "max_price": 3000,
-        "min_price": None,
-        "scoring_mode": "rated",
-        "instant_alert_price": None,
-        "digest_style": "summary_link",
-        "excluded_models": [],
-        "excluded_words": [],
-        "required_keywords": [],
-        "watched_models": [],
-        "hard_criteria": [],
-        "soft_criteria": [],
-        "search_phrases": [
-            {"text": "Marantz PM6007", "source": "explicit", "note": None},
-            {"text": "Yamaha A-S301", "source": "suggested", "note": "similar integrated amp, same price bracket"},
-        ],
-        "marketplaces": ["blocket"],
-    },
+    "summary": "En AI-rankad sökning efter Marantz PM6007 och liknande förstärkare, max 3000 kr.",
+    "name": "Marantz PM6007",
+    "scope": "national",
+    "location": "",
+    "require_shipping": False,
+    "max_price": 3000,
+    "min_price": None,
+    "scoring_mode": "rated",
+    "instant_alert_price": None,
+    "digest_style": "summary_link",
+    "excluded_models": [],
+    "excluded_words": [],
+    "required_keywords": [],
+    "watched_models": [],
+    "hard_criteria": [],
+    "soft_criteria": [],
+    "search_phrases": ["Marantz PM6007"],
+    "suggested_phrases": ["Yamaha A-S301"],
+    "suggested_phrases_note": "similar integrated amp, same price bracket",
+    "marketplaces": ["blocket"],
 })
 
 
@@ -117,7 +115,7 @@ def test_turn_redirects_to_a_status_page_instead_of_blocking_on_claude(client):
     the triggering request must get an immediate redirect, not wait on
     Claude itself - a slow generation blocking the HTTP response is exactly
     what let a reverse proxy's own timeout cut it off."""
-    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
 
     response = client.post("/searches/new-from-prompt", data={"prompt": "x"}, follow_redirects=False)
 
@@ -148,7 +146,7 @@ def test_status_page_redirects_to_searches_for_an_unknown_job_id(client):
 
 
 def test_status_job_is_consumed_after_being_read_once(client):
-    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
     redirect = client.post("/searches/new-from-prompt", data={"prompt": "x"}, follow_redirects=False)
     status_url = redirect.headers["location"]
     first = None
@@ -167,7 +165,7 @@ def test_status_job_is_consumed_after_being_read_once(client):
 
 
 def test_first_turn_can_ask_a_question(client):
-    client.app.state.client = make_fake_claude_client([ASK_USER_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_ASK_JSON])
 
     response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "En bra förstärkare"})
 
@@ -178,7 +176,7 @@ def test_first_turn_can_ask_a_question(client):
 
 
 def test_answering_a_question_leads_to_a_draft(client):
-    client.app.state.client = make_fake_claude_client([ASK_USER_JSON, PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_ASK_JSON, DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
 
     ask_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "En bra förstärkare"})
     transcript = _extract_hidden_value(ask_response.text, "transcript")
@@ -198,7 +196,7 @@ def test_answering_a_question_leads_to_a_draft(client):
 
 
 def test_skip_button_answers_with_best_judgement(client):
-    client.app.state.client = make_fake_claude_client([ASK_USER_JSON, PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_ASK_JSON, DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
 
     ask_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "En bra förstärkare"})
     transcript = _extract_hidden_value(ask_response.text, "transcript")
@@ -214,7 +212,7 @@ def test_skip_button_answers_with_best_judgement(client):
 
 
 def test_create_from_draft_persists_the_search_with_a_collapsed_prompt(client):
-    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
     draft_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"})
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
@@ -236,7 +234,7 @@ def test_create_from_draft_persists_the_search_with_a_collapsed_prompt(client):
 
 
 def test_create_from_draft_drops_unchecked_phrases(client):
-    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
     draft_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"})
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
@@ -261,7 +259,7 @@ def test_create_from_draft_with_a_duplicate_name_shows_an_inline_error_not_a_cra
     searches_repo.create_search(conn, Search(name="Marantz PM6007"))
     before_count = len(searches_repo.list_searches(conn))
 
-    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
     draft_response = submit_wizard_turn(client, "/searches/new-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"})
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
@@ -305,7 +303,7 @@ def test_edit_from_prompt_updates_the_existing_search(client):
     from watcher.models import Search
     created = searches_repo.create_search(conn, Search(name="Old name", max_price=1000))
 
-    client.app.state.client = make_fake_claude_client([PROPOSE_SEARCH_JSON])
+    client.app.state.client = make_fake_claude_client([DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
     draft_response = submit_wizard_turn(
         client, f"/searches/{created.id}/edit-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"}
     )

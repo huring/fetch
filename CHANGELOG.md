@@ -4,6 +4,25 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed the search builder's generation call failing outright with
+  "Schema is too complex"** - reported live right after shipping the 504
+  fix below: Claude's API rejected the request with a 400 the moment the
+  draft schema (nested arrays-of-objects for phrase provenance and watched
+  models) was combined with the "should I ask a question instead" schema in
+  one request. Fixed by splitting what was one combined call into two
+  smaller ones - a tiny "is there enough to finalize, or what should I ask"
+  call, then (once ready) a separate call that produces the actual draft -
+  so neither individual request has to represent both outcomes at once.
+  Also flattened the draft schema itself: a search phrase's "suggested vs.
+  from your prompt" tag is now two plain lists (explicit and suggested, with
+  one shared note for why the suggestions are comparable) instead of a list
+  of tagged objects, and a watched model is now one line of plain text
+  ("pattern | note | good price | ideal") reusing the exact format the
+  manual form's own textarea already used, instead of a list of objects -
+  removing the nesting that was the actual source of the complexity, not
+  just working around the specific combination that failed. Couldn't be
+  verified against the real API from this environment (no key available
+  here) - confirm live that generating now actually completes.
 - **Fixed a 504 Gateway Timeout when generating a search from a prompt** -
   reported live right after shipping the prompt-based search builder: its
   Claude call ran directly inside the HTTP request/response cycle, and a
