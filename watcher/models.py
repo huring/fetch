@@ -68,6 +68,14 @@ class Search(BaseModel):
     # Registry keys (see marketplaces.py) of the marketplaces this search
     # runs on, e.g. ["blocket"].
     marketplaces: List[str] = Field(default_factory=list)
+    # The free-text prompt (see watcher/scoring/search_builder.py) this
+    # search was generated from, if it was - None for a search built with
+    # the manual/advanced form instead. "Editing" a prompt-built search means
+    # re-running the builder against an edited version of this text, which
+    # regenerates every field above from scratch; a manual edit afterward is
+    # not reflected back into this text and will be lost on the next
+    # regeneration (the admin UI warns about this - see search_form.html).
+    creation_prompt: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

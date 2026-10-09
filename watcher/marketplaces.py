@@ -35,6 +35,18 @@ class AuthField:
 
 
 @dataclass(frozen=True)
+class CountEstimate:
+    """How many of a marketplace's listings currently match one search
+    phrase - for the NLP search builder's result-size preview (backlog #21),
+    never for the real fetch/prefilter pipeline. ``exact`` is False when a
+    marketplace doesn't expose a true total (Vinted's pagination nav
+    truncates past 3 pages - see sources/vinted.py's count()), in which case
+    ``total`` is a confirmed lower bound, not a guess."""
+    total: int
+    exact: bool
+
+
+@dataclass(frozen=True)
 class Marketplace:
     key: str
     display_name: str
@@ -68,6 +80,20 @@ class Marketplace:
     # re-fetching the page (see liveness.run_auction_end_sweep), and its
     # candidates carry auction_ends_at into Claude's scoring prompt.
     is_auction: bool = False
+    # Optional: given a search phrase (plus the full search, for anything
+    # location-specific like Blocket's county filter), a cheap estimate of
+    # how many of this marketplace's listings currently match it - used only
+    # by the NLP search builder's result-size preview (backlog #21), never
+    # by the real fetch/prefilter pipeline. A marketplace that can't offer
+    # one cheaply leaves this unset rather than approximating by paging
+    # through everything (none currently do, but nothing requires it).
+    estimate_count: Optional[Callable[[str, Search, MarketplaceConfig, Settings], CountEstimate]] = None
+    # A one-line description of what this marketplace actually carries, for
+    # the search builder's system prompt - it needs this to judge which
+    # registered marketplaces plausibly fit a given search (e.g. a vintage
+    # synth probably isn't on Rehifi), not to describe listings once fetched
+    # (that's scoring_note's job).
+    category_note: str = ""
 
 
 MARKETPLACES: Dict[str, "Marketplace"] = {}
@@ -116,12 +142,24 @@ def _blocket_check_active(url: str) -> bool:
     return blocket_source.check_active(url)
 
 
+def _blocket_estimate_count(
+    phrase: str, search: Search, config: MarketplaceConfig, settings: Settings
+) -> CountEstimate:
+    location_code = resolve_county_code(search.location) if search.scope == "local" and search.location else None
+    return CountEstimate(total=blocket_source.count(phrase, location_code=location_code), exact=True)
+
+
 register(
     Marketplace(
         key="blocket",
         display_name="Blocket",
         fetch=_blocket_fetch,
         auth_fields=(),
+        category_note=(
+            "Sweden's largest general classifieds site, every category (electronics, vehicles, furniture, "
+            "instruments, etc) - a safe default for almost anything secondhand."
+        ),
+        estimate_count=_blocket_estimate_count,
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,
         enrich_description=_blocket_enrich_description,
@@ -152,12 +190,23 @@ def _vinted_check_active(url: str) -> bool:
     return vinted_source.check_active(url)
 
 
+def _vinted_estimate_count(phrase: str, search: Search, config: MarketplaceConfig, settings: Settings) -> CountEstimate:
+    total, exact = vinted_source.count(phrase)
+    return CountEstimate(total=total, exact=exact)
+
+
 register(
     Marketplace(
         key="vinted",
         display_name="Vinted",
         fetch=_vinted_fetch,
         auth_fields=(),
+        category_note=(
+            "A fashion/lifestyle secondhand marketplace (clothing, accessories) that's shipping-first and "
+            "cross-border by default - some electronics/hifi gear shows up, but it's not its main category. "
+            "No location filter at all, so not useful for a tightly local-scope search."
+        ),
+        estimate_count=_vinted_estimate_count,
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,
         enrich_description=_vinted_enrich_description,
@@ -179,12 +228,22 @@ def _rehifi_check_active(url: str) -> bool:
     return rehifi_source.check_active(url)
 
 
+def _rehifi_estimate_count(phrase: str, search: Search, config: MarketplaceConfig, settings: Settings) -> CountEstimate:
+    return CountEstimate(total=rehifi_source.count(phrase), exact=True)
+
+
 register(
     Marketplace(
         key="rehifi",
         display_name="Rehifi",
         fetch=_rehifi_fetch,
         auth_fields=(),
+        category_note=(
+            "A Swedish specialist retailer (not classifieds) selling used/refurbished hifi/audio gear only, "
+            "with warranty - good for a search that's specifically hifi equipment, useless for anything else "
+            "(vehicles, furniture, non-audio electronics, etc)."
+        ),
+        estimate_count=_rehifi_estimate_count,
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,
         check_active=_rehifi_check_active,
@@ -208,12 +267,22 @@ def _auctionet_fetch(
     return auctionet_source.fetch(phrase, max_pages=settings.max_pages_per_query)
 
 
+def _auctionet_estimate_count(phrase: str, search: Search, config: MarketplaceConfig, settings: Settings) -> CountEstimate:
+    return CountEstimate(total=auctionet_source.count(phrase), exact=True)
+
+
 register(
     Marketplace(
         key="auctionet",
         display_name="Auctionet",
         fetch=_auctionet_fetch,
         auth_fields=(),
+        category_note=(
+            "A live-auction aggregator across many independent Swedish auction houses, every category "
+            "including vintage/high-end hifi, antiques, art, vehicles - prices are current bid requirements, "
+            "not fixed asking prices, and every result has a bidding deadline."
+        ),
+        estimate_count=_auctionet_estimate_count,
         default_poll_interval_minutes=240,
         default_request_delay_seconds=2.0,
         is_auction=True,

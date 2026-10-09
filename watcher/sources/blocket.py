@@ -100,6 +100,25 @@ def fetch(
     return listings
 
 
+def count(q: str, location_code: Optional[str] = None) -> int:
+    """Total number of matches for a search phrase, for the NLP search
+    builder's result-size preview (backlog #21) - a single lightweight
+    request, no pagination. Confirmed live (2026-10): Blocket's response
+    metadata already carries the true total count across every page
+    (``result_size.match_count``) - cheaper and more accurate than paging
+    through results to count them, and unrelated to ``num_results`` (which is
+    actually just this page's size, not a total, despite the name)."""
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    params = {"q": q, "cg": DEFAULT_CATEGORY, "sc": DEFAULT_SUB_CATEGORY, "sort": "PUBLISHED_DESC", "page": 1}
+    if location_code:
+        params["location"] = location_code
+    try:
+        data = get_json(SEARCH_URL, params=params, headers=headers)
+    except Exception as exc:
+        raise SourceError(f"Blocket count failed for q={q!r}: {exc}") from exc
+    return int(data.get("metadata", {}).get("result_size", {}).get("match_count", 0))
+
+
 def _parse_ad(ad: dict) -> Optional[Listing]:
     ad_id = ad.get("ad_id") or ad.get("id")
     if not ad_id:

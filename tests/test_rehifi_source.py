@@ -134,6 +134,23 @@ def test_fetch_empty_phrase_returns_empty():
 
 
 @responses.activate
+def test_count_matches_fetch_without_fetching_any_product_page():
+    _mock_catalog()
+
+    assert rehifi.count("rega") == 1
+    # _mock_catalog only registers the sitemap requests, not any product
+    # page - count() raising here (via an unregistered-URL error from
+    # `responses`) would mean it fetched product pages it doesn't need to.
+
+
+@responses.activate
+def test_count_is_zero_for_no_match():
+    _mock_catalog()
+
+    assert rehifi.count("nonexistent brand xyz") == 0
+
+
+@responses.activate
 def test_catalog_is_cached_across_calls():
     _mock_catalog()
     responses.add(

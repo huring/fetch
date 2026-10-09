@@ -3,7 +3,10 @@
 {% block content %}
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-semibold">Searches</h1>
-    <a href="/searches/new" class="inline-flex items-center px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">+ New search</a>
+    <div class="flex items-center gap-3">
+        <a href="/searches/new-from-prompt" class="inline-flex items-center px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">+ New search</a>
+        <a href="/searches/new" class="text-xs text-gray-400 hover:text-gray-200 underline">or build it manually</a>
+    </div>
 </div>
 
 {% if ran_search_name %}<p class="inline-flex px-3 py-1.5 rounded-md bg-green-900 text-green-300 text-sm mb-6">Triggered a manual run for "{{ ran_search_name }}" - check <a href="/health" class="underline">Health</a> shortly.</p>{% endif %}
@@ -86,6 +89,7 @@
                 <td class="px-3 py-2 text-gray-500">-</td>
                 {% endif %}
                 <td class="px-3 py-2 whitespace-nowrap">
+                    <a href="/searches/{{ s.id }}/edit-from-prompt" class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs inline-block">Edit via prompt</a>
                     <form class="inline" method="post" action="/searches/{{ s.id }}/run">
                         <button class="px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-xs" type="submit">Run now</button>
                     </form>

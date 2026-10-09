@@ -54,9 +54,6 @@ the adapter/polling needs to handle "nothing live right now" as a normal,
 expected state, not a failure (e.g. not tripping the source-health
 "N failures in a row" alert just because a month's auction hasn't started).
 
-## 21. Add prompt/NLP when creating new searches
-I want to be able to type into a prompt what i'm looking for, what my requirements are, and by using NLP infer what should go where in the search parameters, to create a new search.
-
 ## 24. Show status badge on searches page
 When "Run now" is clicked, update the status-badge to a yellow "running" badge while the search is running.
 

@@ -176,3 +176,42 @@ def test_check_active_false_when_jsonld_missing_on_200():
 
 def test_check_active_empty_url_returns_false():
     assert vinted.check_active("") is False
+
+
+def _pagination_nav(page_numbers, truncated=False):
+    links = "".join(f'<a data-testid="catalog-pagination--page-{n}">{n}</a>' for n in page_numbers)
+    ellipsis = '<li class="web_ui__Pagination__ellipsis"></li>' if truncated else ""
+    return f'<nav data-testid="catalog-pagination"><ul>{links}{ellipsis}</ul></nav>'
+
+
+@responses.activate
+def test_count_is_exact_when_pagination_has_no_ellipsis():
+    html = f"<html><body>{_pagination_nav([1, 2, 3])}</body></html>"
+    responses.add(responses.GET, vinted.SEARCH_URL, body=html, status=200, match=_search_match("onkyo", page=1))
+
+    total, exact = vinted.count("onkyo")
+
+    assert total == 3 * vinted.ITEMS_PER_PAGE
+    assert exact is True
+
+
+@responses.activate
+def test_count_is_a_lower_bound_when_pagination_is_truncated():
+    html = f"<html><body>{_pagination_nav([1, 2, 3], truncated=True)}</body></html>"
+    responses.add(responses.GET, vinted.SEARCH_URL, body=html, status=200, match=_search_match("forstarkare", page=1))
+
+    total, exact = vinted.count("forstarkare")
+
+    assert total == 3 * vinted.ITEMS_PER_PAGE
+    assert exact is False
+
+
+@responses.activate
+def test_count_falls_back_to_counting_items_when_theres_no_pagination_nav():
+    items = [_item(1, "Onkyo A-9010"), _item(2, "Onkyo A-9010 B")]
+    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(items), status=200, match=_search_match("onkyo", page=1))
+
+    total, exact = vinted.count("onkyo")
+
+    assert total == 2
+    assert exact is True

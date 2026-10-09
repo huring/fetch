@@ -4,6 +4,40 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Added a prompt-based way to create and edit searches** (was backlog #21)
+  - until now, configuring a search (especially a "rated" one with hard/soft
+  criteria and watched models) meant hand-filling a form with ~15 fields.
+  "+ New search" now opens a prompt box instead: describe what you want in
+  plain text (Swedish is fine), and Claude either asks a clarifying question
+  (only when genuinely blocked, or to offer something non-trivial the
+  prompt didn't address - most commonly, whether to also search for
+  comparable models/brands when the prompt names one specific item) or
+  proposes a finished search. The proposal shows a plain-language summary,
+  and tags each search phrase as either straight from the prompt or a
+  Claude-suggested comparable (with a reason) - suggested ones are
+  pre-checked but can be unchecked before saving. A "Preview result counts"
+  button shows roughly how many raw matches each marketplace currently has
+  for this search (not an exact simulation, just a sense of whether the
+  pool is tiny or huge, to judge whether to narrow or widen the prompt) -
+  Blocket and Auctionet both expose a genuine total-match count in one
+  cheap request, Rehifi's is free (a slug match against its own already-
+  cached catalog), and Vinted's pagination only ever reveals an exact count
+  up to 3 pages, so past that it's shown as a confirmed lower bound rather
+  than a guess. A search built this way remembers its prompt (editable
+  later via a new "Edit via prompt" option, which regenerates the whole
+  search from scratch from the edited text - any manual field tweak made
+  outside the prompt won't survive a later regeneration, which the existing
+  manual/advanced form now warns about when applicable); the manual form
+  itself is unchanged and still reachable as "or build it manually," for
+  anyone who prefers it or needs to fix something Claude got wrong without
+  fighting the prompt. (Lars also floated signing into Fetch with a
+  claude.ai account, both as auth and to use Claude via that subscription
+  instead of the existing API key - decided against for now: there's no
+  general-purpose "sign in with Claude" flow Fetch could integrate with,
+  and a claude.ai subscription doesn't include API access anyway, separate
+  billing. Backlog #14, the actual "add admin UI auth" story, stays open
+  but low-priority since Fetch only ever runs on Lars's own homelab behind
+  his firewall.)
 - **Fixed a plain Blocket search dropping most of its real matches, and
   sorted plain-search results by distance** - reported live: a national
   "Förstärkare" search only surfaced 22 ads, far fewer than the thousands

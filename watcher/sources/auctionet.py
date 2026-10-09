@@ -105,3 +105,15 @@ def fetch(phrase: str, max_pages: int = 2) -> List[Listing]:
         if page >= pagination.get("total_pages", page):
             break
     return listings
+
+
+def count(phrase: str) -> int:
+    """Total number of (unhammered) matches for a search phrase, for the NLP
+    search builder's result-size preview (backlog #21) - a single page-1
+    request, reading the API's own ``pagination.total_entries`` rather than
+    paging through everything to count it."""
+    try:
+        data = get_json(SEARCH_URL, params={"q": phrase, "locale": "sv", "hammered": "false", "page": 1}, headers={"User-Agent": USER_AGENT})
+    except Exception as exc:
+        raise SourceError(f"Auctionet count failed for q={phrase!r}: {exc}") from exc
+    return int((data.get("pagination") or {}).get("total_entries", 0))
