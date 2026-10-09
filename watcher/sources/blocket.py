@@ -34,7 +34,7 @@ DEFAULT_SUB_CATEGORY = "1.93.3906"  # Ljud & Bild
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/120.0"
 
 
-def fetch(q: str, max_pages: int = 2) -> List[Listing]:
+def fetch(q: str, max_pages: int = 2, location_code: Optional[str] = None) -> List[Listing]:
     """Fetch listings for a single Blocket search phrase.
 
     The response field names used in ``_parse_ad`` follow the shape documented
@@ -43,13 +43,14 @@ def fetch(q: str, max_pages: int = 2) -> List[Listing]:
     ``_parse_ad`` is the one place to fix - run with --dry-run after any
     change to confirm parsing still works.
 
-    No location/region filter is sent to Blocket's own search API - confirmed
-    live (2026-10, backlog #26) that the search endpoint 400s on *any*
-    `location` value, tried as a plain Swedish county name, a numeric code, or
-    lowercased, even paired with an otherwise-working query. A "local" scope
-    search's location match is already applied client-side after fetching
-    (see pipeline._filter_by_scope), so this isn't a loss of functionality,
-    just one fewer (broken) server-side round trip.
+    ``location_code`` is Blocket's own county facet code (e.g. "0.300025" for
+    Norrbotten - see blocket_geo.py), not a plain place name. backlog #26
+    previously found the search endpoint 400s on a plain Swedish county name
+    - true, but that was the wrong param shape: confirmed live (2026-10) that
+    the facet code works and genuinely filters server-side. When a search's
+    location doesn't resolve to a known county (see
+    blocket_geo.resolve_county_code), the caller passes None and relies on
+    the client-side location match instead (pipeline._filter_by_scope).
     """
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     listings: List[Listing] = []
@@ -61,6 +62,8 @@ def fetch(q: str, max_pages: int = 2) -> List[Listing]:
             "sort": "PUBLISHED_DESC",
             "page": page,
         }
+        if location_code:
+            params["location"] = location_code
         try:
             data = get_json(SEARCH_URL, params=params, headers=headers)
         except Exception as exc:

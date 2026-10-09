@@ -44,6 +44,7 @@ from watcher.scoring.claude_scorer import estimate_cost_usd
 from watcher.scoring.prefilter import passes_prefilter
 from watcher.settings import Settings
 from watcher.sources.base import SourceError
+from watcher.sources.blocket_geo import COUNTY_MUNICIPALITIES
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +57,28 @@ ONCE_SCORING_POLL_SECONDS = 15
 def _filter_by_scope(listings: List[Listing], search: Search) -> List[Listing]:
     """For local-scope searches, drop listings whose location is known and
     doesn't match - listings with no location info are kept (can't exclude
-    what we can't check)."""
+    what we can't check).
+
+    Confirmed live (2026-10) as a real bug otherwise: a marketplace's own
+    location field is usually a city/municipality ("Luleå"), not the county
+    ("Norrbotten") someone would naturally type into a search's location
+    field - a plain substring match between the two never succeeds, so
+    *every* listing with a known location silently gets dropped the moment
+    search.location names a county rather than a city. If search.location
+    names a known Swedish county, a listing also matches when its location is
+    one of that county's municipalities."""
     if search.scope != "local" or not search.location:
         return listings
-    loc = search.location.lower()
-    return [l for l in listings if l.location is None or loc in l.location.lower()]
+    loc = search.location.strip().lower()
+    county_municipalities = {
+        m.lower() for county, municipalities in COUNTY_MUNICIPALITIES.items() if county.lower() == loc for m in municipalities
+    }
+
+    def matches(listing_location: str) -> bool:
+        listing_loc = listing_location.lower()
+        return loc in listing_loc or listing_loc in county_municipalities
+
+    return [l for l in listings if l.location is None or matches(l.location)]
 
 
 def _maybe_send_plain_instant_alert(

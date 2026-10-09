@@ -24,6 +24,7 @@ from watcher.sources import auctionet as auctionet_source
 from watcher.sources import blocket as blocket_source
 from watcher.sources import rehifi as rehifi_source
 from watcher.sources import vinted as vinted_source
+from watcher.sources.blocket_geo import resolve_county_code
 
 
 @dataclass(frozen=True)
@@ -85,11 +86,15 @@ def get(key: str) -> Optional[Marketplace]:
 def _blocket_fetch(
     phrase: str, *, search: Search, config: MarketplaceConfig, settings: Settings
 ) -> List[Listing]:
-    # Blocket's search API has no working location/region filter (see
-    # blocket_source.fetch's docstring, backlog #26) - a "local" scope
-    # search's location is applied client-side instead, after fetching (see
-    # pipeline._filter_by_scope).
-    return blocket_source.fetch(phrase, max_pages=settings.max_pages_per_query)
+    # A "local" scope search whose location names a Swedish county (e.g.
+    # "Norrbotten") gets filtered server-side by Blocket itself (see
+    # blocket_source.fetch's docstring) - confirmed live (2026-10) to
+    # actually narrow results, unlike the plain-name attempt backlog #26
+    # tried. Anything that doesn't resolve to a known county (a city name, a
+    # typo, "national" scope) falls back to no server-side filter, same as
+    # before - pipeline._filter_by_scope still applies client-side.
+    location_code = resolve_county_code(search.location) if search.scope == "local" and search.location else None
+    return blocket_source.fetch(phrase, max_pages=settings.max_pages_per_query, location_code=location_code)
 
 
 def _blocket_enrich_description(url: str) -> str:

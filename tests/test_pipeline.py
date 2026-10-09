@@ -409,6 +409,32 @@ def test_send_digest_includes_plain_search_entries():
     assert row["included_in_digest_at"] is not None
 
 
+def test_run_marketplace_cycle_keeps_listings_in_county_when_location_is_a_county_name():
+    """Confirmed live (2026-10) as a real bug otherwise: Blocket
+    reports a listing's location as a municipality ("Luleå"), not the county
+    ("Norrbotten") someone naturally types into a search's location field - a
+    plain substring match between the two always fails, silently dropping
+    every listing with a known location."""
+    conn = make_conn()
+    searches.create_search(
+        conn,
+        Search(
+            name="Snowmobile parts", scoring_mode="rated", search_phrases=["ski-doo"], marketplaces=["blocket"],
+            scope="local", location="Norrbotten",
+        ),
+    )
+    in_county = make_listing("1", "Ski-Doo kapell")
+    in_county.location = "Luleå"
+    out_of_county = make_listing("2", "Ski-Doo kapell annan ort")
+    out_of_county.location = "Mora"
+
+    with patch("watcher.sources.blocket.fetch", return_value=[in_county, out_of_county]):
+        pipeline.run_marketplace_cycle(conn, make_settings(), "blocket")
+
+    titles = {row["title"] for row in conn.execute("SELECT title FROM listings").fetchall()}
+    assert titles == {"Ski-Doo kapell"}
+
+
 def test_run_marketplace_cycle_unknown_key_raises():
     conn = make_conn()
     with pytest.raises(ValueError):

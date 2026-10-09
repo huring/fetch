@@ -58,6 +58,31 @@ def test_fetch_parses_listings():
 
 
 @responses.activate
+def test_fetch_passes_location_code_when_given():
+    """Confirmed live (2026-10): Blocket's search endpoint
+    genuinely filters server-side on its own county facet code, unlike the
+    plain county name backlog #26 tried."""
+    match = [matchers.query_param_matcher({
+        "q": "ski-doo", "cg": blocket.DEFAULT_CATEGORY, "sc": blocket.DEFAULT_SUB_CATEGORY,
+        "sort": "PUBLISHED_DESC", "page": "1", "location": "0.300025",
+    })]
+    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200, match=match)
+
+    blocket.fetch("ski-doo", location_code="0.300025")
+
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_fetch_omits_location_param_when_not_given():
+    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200, match=_search_match("onkyo", page=1))
+
+    blocket.fetch("onkyo")
+
+    assert "location=" not in responses.calls[0].request.url
+
+
+@responses.activate
 def test_fetch_stops_on_empty_page():
     responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200, match=_search_match("nonexistent", page=1))
 

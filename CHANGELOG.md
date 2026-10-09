@@ -4,6 +4,29 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed a "local" scope search silently finding nothing** - reported live:
+  a Norrbotten-scoped "Ski-doo"/"Ski-doo Summit" search returned zero ads,
+  despite the same search on blocket.se itself returning 9. Root cause: the
+  client-side location filter compared a search's typed location ("Norrbotten",
+  a county) against Blocket's own location field on each listing ("Luleå",
+  "Boden", etc - a municipality), with a plain substring match that can never
+  succeed between the two - every listing with a known location was silently
+  dropped the moment a search's location named a county rather than a city
+  (invisible until now since every existing search happened to use a
+  location that matched its own capital city by coincidence, e.g.
+  "Stockholm"). Fixed two ways: the location filter now also checks Blocket's
+  own county/municipality geography (confirmed live, 2026-10 - 21 counties,
+  290 municipalities, read straight from Blocket's own search-facet data), so
+  a county match works for every marketplace; and Blocket's search endpoint
+  turns out to genuinely filter server-side when given its own county facet
+  code (e.g. "0.300025" for Norrbotten) - a real fix to backlog #26's
+  conclusion that location filtering was entirely broken there, which had
+  only tried passing a plain county name (confirmed live, 2026-10, to still
+  400 as before - the facet code was the missing piece). Separately
+  confirmed working as designed, not a bug: a search's multiple phrase lines
+  (one per line, e.g. "Ski-doo" and "Ski-doo Summit") already each run as
+  their own independent marketplace search and get merged into one result
+  set - no change needed there.
 - **Fixed "Top ads" (and the feed's "Maybe"/"Yes!" view) showing a stale
   search's old scores instead of current standouts** - reported live: a
   search that used to be AI-rated and was later switched to plain kept
