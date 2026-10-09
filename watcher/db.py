@@ -72,6 +72,10 @@ CREATE TABLE IF NOT EXISTS listings (
     image_url TEXT,
     distance_km REAL,
     raw_json TEXT NOT NULL DEFAULT '{}',
+    feedback TEXT,
+    feedback_reason TEXT,
+    feedback_detail TEXT,
+    feedback_at TEXT,
     UNIQUE(search_id, source, external_id)
 );
 
@@ -451,6 +455,26 @@ def _migrate_add_watched_item_last_error_status(conn: sqlite3.Connection) -> Non
         conn.commit()
 
 
+def _migrate_add_listing_feedback(conn: sqlite3.Connection) -> None:
+    """Adds feedback/feedback_reason/feedback_detail/feedback_at to a
+    listings table created before the admin UI's like/not-interested buttons
+    existed (backlog #30's foundation) - a per-listing "liked" or "dismissed"
+    signal, with an optional reason category (see watcher/feedback.py) and
+    free-text detail (e.g. "no 4K support"), meant to eventually feed a
+    suggestion-review panel for tuning the search's own filters. No-op on a
+    fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "listings" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(listings)")}
+    if "feedback" not in columns:
+        conn.execute("ALTER TABLE listings ADD COLUMN feedback TEXT")
+        conn.execute("ALTER TABLE listings ADD COLUMN feedback_reason TEXT")
+        conn.execute("ALTER TABLE listings ADD COLUMN feedback_detail TEXT")
+        conn.execute("ALTER TABLE listings ADD COLUMN feedback_at TEXT")
+        conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -473,6 +497,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_watched_item_enrichment(conn)
     _migrate_add_watched_item_in_stock(conn)
     _migrate_add_watched_item_last_error_status(conn)
+    _migrate_add_listing_feedback(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

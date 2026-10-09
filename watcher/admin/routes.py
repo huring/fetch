@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from watcher import feedback as feedback_taxonomy
 from watcher import marketplace_configs as marketplace_configs_repo
 from watcher import searches as searches_repo
 from watcher import storage
@@ -163,9 +164,29 @@ def search_listings(request: Request, search_id: int, bucket: str = "found"):
         request, "search_listings.html",
         {
             "search": search, "bucket": bucket, "bucket_label": storage.BUCKET_LABELS[bucket],
-            "listings": listings,
+            "bucket_labels": storage.BUCKET_LABELS,
+            "listings": listings, "dismiss_reasons": feedback_taxonomy.DISMISS_REASONS,
+            "dismiss_reason_labels": feedback_taxonomy.DISMISS_REASON_LABELS,
         },
     )
+
+
+@router.post("/searches/{search_id}/listings/{listing_id}/feedback")
+async def set_listing_feedback(request: Request, search_id: int, listing_id: int):
+    conn = request.app.state.conn
+    form_data = await request.form()
+    action = form_data.get("action", "")
+    detail = form_data.get("detail", "").strip()
+    bucket = form_data.get("bucket", "found")
+    if bucket not in storage.BUCKETS:
+        bucket = "found"
+    if action == "clear":
+        storage.clear_listing_feedback(conn, listing_id)
+    elif action == "like":
+        storage.set_listing_feedback(conn, listing_id, "liked", None, detail)
+    elif action in feedback_taxonomy.DISMISS_REASON_KEYS:
+        storage.set_listing_feedback(conn, listing_id, "dismissed", action, detail)
+    return RedirectResponse(f"/searches/{search_id}/listings?bucket={bucket}", status_code=303)
 
 
 @router.get("/feed", response_class=HTMLResponse)

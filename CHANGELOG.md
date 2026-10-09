@@ -4,6 +4,19 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Added per-listing "like"/"not interested" feedback to the admin UI
+  (partial progress on backlog #30)** - each listing in a search's listing
+  table now has an inline feedback control: pick "Like" or a specific reason
+  for not being interested (wrong model/variant, missing a feature, bad
+  condition, too expensive, too cheap/suspicious, no shipping, too far away,
+  or just not interested), with an optional free-text detail (e.g. "no 4K
+  support"). A "not interested" listing drops out of the Found/Maybe/Yes!
+  buckets into its own "Not interested" tab, so it stops competing for
+  attention without being deleted - feedback can always be undone from
+  there. This is the data-capture half of the plan; the follow-up (a
+  suggestion-review panel that turns accumulated feedback into proposed
+  edits to a search's excluded models/words, required keywords, price
+  range, or ideal models) is tracked as the remaining backlog #30.
 - **Fixed the admin UI's wizard feeling laggy while typing a prompt (was
   backlog #26)** - root cause: `base.html` was loading Tailwind's "Play
   CDN" script (`cdn.tailwindcss.com`), a ~400KB JIT compiler that recomputes

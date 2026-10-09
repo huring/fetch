@@ -297,22 +297,28 @@ def get_pending_plain_digest(conn: sqlite3.Connection) -> List[sqlite3.Row]:
     ).fetchall()
 
 
-BUCKETS = ("found", "daily_roundup", "instant_alert")
+BUCKETS = ("found", "daily_roundup", "instant_alert", "dismissed")
 
 # UI display labels only (decided 2026-10-08, backlog item 18) - code/internal
 # references use "daily_roundup"/"instant_alert" (named after when you're
 # notified, matching SCORE_DIGEST_MIN/SCORE_INSTANT_THRESHOLD directly), the
 # admin UI itself shows the terser "Maybe"/"Yes!" instead.
-BUCKET_LABELS = {"found": "Found", "daily_roundup": "Maybe", "instant_alert": "Yes!"}
+BUCKET_LABELS = {"found": "Found", "daily_roundup": "Maybe", "instant_alert": "Yes!", "dismissed": "Not interested"}
 
 
 def _bucket_predicate(bucket: str, score_digest_min: int, score_instant_threshold: int) -> str:
+    # A listing marked "not interested" (see watcher/feedback.py) drops out of
+    # every normal bucket and only shows up under its own "dismissed" bucket,
+    # so it stops competing for attention without being deleted outright.
+    if bucket == "dismissed":
+        return "feedback = 'dismissed'"
+    not_dismissed = "(feedback IS NULL OR feedback != 'dismissed')"
     if bucket == "instant_alert":
-        return f"score >= {score_instant_threshold}"
+        return f"score >= {score_instant_threshold} AND {not_dismissed}"
     if bucket == "daily_roundup":
-        return f"score BETWEEN {score_digest_min} AND {score_instant_threshold - 1}"
+        return f"score BETWEEN {score_digest_min} AND {score_instant_threshold - 1} AND {not_dismissed}"
     if bucket == "found":
-        return "score IS NOT NULL AND score != 0"
+        return f"score IS NOT NULL AND score != 0 AND {not_dismissed}"
     raise ValueError(f"Unknown bucket {bucket!r}")
 
 
@@ -360,6 +366,35 @@ def list_bucket_listings(
         f"SELECT * FROM listings WHERE search_id = ? AND {predicate} ORDER BY {_LISTING_ORDER_BY}",
         (search_id,),
     ).fetchall()
+
+
+def set_listing_feedback(
+    conn: sqlite3.Connection, listing_id: int, feedback: str, reason: Optional[str], detail: str
+) -> None:
+    """Records a "like" or "dismiss" (feedback) from the admin UI's
+    per-listing feedback form - see watcher/feedback.py for the dismiss
+    reason taxonomy. reason is None for a like (or a dismiss with no reason
+    picked); detail is the optional free-text note (e.g. "no 4K support"),
+    stored even when empty so a later edit can tell "cleared" from "never
+    set" if that ever matters."""
+    conn.execute(
+        """
+        UPDATE listings
+        SET feedback = ?, feedback_reason = ?, feedback_detail = ?, feedback_at = datetime('now')
+        WHERE id = ?
+        """,
+        (feedback, reason, detail, listing_id),
+    )
+    conn.commit()
+
+
+def clear_listing_feedback(conn: sqlite3.Connection, listing_id: int) -> None:
+    conn.execute(
+        "UPDATE listings SET feedback = NULL, feedback_reason = NULL, feedback_detail = NULL, feedback_at = NULL "
+        "WHERE id = ?",
+        (listing_id,),
+    )
+    conn.commit()
 
 
 def list_feed_listings(

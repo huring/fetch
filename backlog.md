@@ -60,6 +60,34 @@ When "Run now" is clicked, update the status-badge to a yellow "running" badge w
 ## 25. Delete items when searches are deleted
 When i remove a search, delete all the items associated whith that search as well. Keep the pricing info if there is any, incase i add the item later.
 
+## 30. Suggestion-review panel for learned search feedback
+
+Follow-up to the like/not-interested feedback capture (added on top of this
+story - see CHANGELOG): once a search has accumulated some `feedback` rows on
+its listings, add a "Learned from feedback" panel to the search edit page
+that aggregates them into proposed config diffs, each with its own
+Apply/Ignore button (never auto-applied):
+
+- Content reasons (`wrong_model`, `missing_feature`, `bad_condition`,
+  `too_expensive`, `too_cheap`) -> suggest additions to `excluded_models`/
+  `required_keywords`/`excluded_words`, or a `max_price`/`min_price` nudge.
+- Logistics reasons (`no_shipping`) -> suggest flipping `require_shipping`
+  on. `too_far` and `not_interested` never produce a suggestion.
+- A "liked" listing -> suggest adding its model/pattern to
+  `watched_models` with `is_ideal=true` and the liked price as
+  `good_price`.
+
+No new filtering mechanism needed - this only ever proposes edits to fields
+`prefilter.py`/`claude_scorer.py` already read. Needs enough real feedback
+data first to judge whether the free-text `feedback_detail` extraction
+(e.g. pulling "4k" out of "no 4K support") is reliable enough to suggest
+automatically, or whether it should just surface the raw detail text next to
+a manual add-to-list button instead.
+
+Explicitly deferred for now (per Lars, 2026-10-09): feeding dismissals/likes
+into the Claude scoring prompt as negative/positive examples. Revisit once
+the reason/detail data from this panel's use has proven clean enough.
+
 ## 29. Fix Vinted via FlareSolverr
 Vinted now serves a real Cloudflare "managed challenge" (JS computational
 challenge) for every `/catalog` request - confirmed live (2026-10) via a
