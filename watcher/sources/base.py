@@ -120,6 +120,23 @@ def extract_jsonld_product(html: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def image_url_from_jsonld_product(product: Dict[str, Any]) -> str:
+    """Pulls the image URL out of a schema.org Product block's "image"
+    field, which is inconsistently a single URL string, a list of them, or
+    a single ImageObject dict - shared by watcher/price_watch.py (a page's
+    own JSON-LD) and sources/rehifi.py (the same JSON-LD shape, already
+    parsed as that source's `raw`). Returns "" if nothing usable is found."""
+    image = product.get("image")
+    if isinstance(image, str):
+        return image
+    if isinstance(image, list) and image:
+        first = image[0]
+        return first if isinstance(first, str) else (first.get("url", "") if isinstance(first, dict) else "")
+    if isinstance(image, dict):
+        return image.get("url", "")
+    return ""
+
+
 _OG_IMAGE_RE = re.compile(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', re.I)
 _OG_IMAGE_RE_ALT = re.compile(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', re.I)
 

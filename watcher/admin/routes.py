@@ -122,7 +122,10 @@ def list_searches(request: Request, ran: Optional[int] = None):
     all_searches = searches_repo.list_searches(conn)
     counts = storage.get_search_bucket_counts(conn, settings.score_digest_min, settings.score_instant_threshold)
     overview = storage.get_overview_stats(conn, settings.score_digest_min, settings.score_instant_threshold)
-    top_listings = storage.get_top_listings(conn)
+    top_listings = [
+        dict(row, platform_name=getattr(get_marketplace(row["source"]), "display_name", row["source"]))
+        for row in storage.get_top_listings(conn, settings.score_instant_threshold)
+    ]
     ran_search_name = next((s.name for s in all_searches if s.id == ran), None) if ran is not None else None
     return templates.TemplateResponse(
         request, "searches_list.html",

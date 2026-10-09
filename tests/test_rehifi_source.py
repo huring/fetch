@@ -35,12 +35,12 @@ SITEMAP_PAGE_2 = """<?xml version="1.0"?>
 </urlset>"""
 
 
-def _product_html(name, price, sku, in_stock=True, description="Märke: Test<br>Modell: X"):
+def _product_html(name, price, sku, in_stock=True, description="Märke: Test<br>Modell: X", image=""):
     availability = "http://schema.org/InStock" if in_stock else "http://schema.org/OutOfStock"
     jsonld = (
-        '[{"@type": "Product", "name": "%s", "sku": "%s", "description": "", '
+        '[{"@type": "Product", "name": "%s", "sku": "%s", "description": "", "image": "%s", '
         '"offers": {"@type": "Offer", "price": "%s", "priceCurrency": "SEK", '
-        '"availability": "%s"}}]' % (name, sku, price, availability)
+        '"availability": "%s"}}]' % (name, sku, image, price, availability)
     )
     return f"""
     <html><body>
@@ -62,7 +62,7 @@ def test_fetch_matches_phrase_against_slug_and_parses_listing():
     responses.add(
         responses.GET,
         "https://www.rehifi.se/product/rega-elicit-mk5",
-        body=_product_html("Rega Elicit MK5", "17990", "88210"),
+        body=_product_html("Rega Elicit MK5", "17990", "88210", image="https://www.rehifi.se/img/rega.jpg"),
         status=200,
     )
 
@@ -78,6 +78,7 @@ def test_fetch_matches_phrase_against_slug_and_parses_listing():
     assert listing.ships is True
     assert listing.location is None
     assert "Märke: Test" in listing.description
+    assert listing.image_url == "https://www.rehifi.se/img/rega.jpg"
 
 
 @responses.activate

@@ -19,6 +19,7 @@ def test_fetch_parses_listings():
                     "canonical_url": "https://www.blocket.se/recommerce/forsale/item/123",
                     "location": "Stockholm",
                     "timestamp": 1791106631000,
+                    "image": {"url": "https://images.blocketcdn.se/item/123.jpg"},
                 }
             ]
         },
@@ -38,6 +39,7 @@ def test_fetch_parses_listings():
     assert listing.url == "https://www.blocket.se/recommerce/forsale/item/123"
     assert listing.published_at is not None
     assert listing.published_at.year == 2026
+    assert listing.image_url == "https://images.blocketcdn.se/item/123.jpg"
 
 
 @responses.activate

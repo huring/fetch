@@ -6,7 +6,7 @@ from watcher.sources import vinted
 from watcher.sources.base import SourceError
 
 
-def _item(item_id, title, amount="500.00", url_slug=None):
+def _item(item_id, title, amount="500.00", url_slug=None, thumbnail_url=None):
     url_slug = url_slug or f"{item_id}-item"
     return {
         "id": item_id,
@@ -16,6 +16,7 @@ def _item(item_id, title, amount="500.00", url_slug=None):
             "url": f"/items/{url_slug}",
             "price": {"amount": amount, "currencyCode": "SEK"},
             "itemBox": {"accessibilityLabel": f"{title}, Skick: Bra, {amount} kr"},
+            **({"thumbnailUrl": thumbnail_url} if thumbnail_url else {}),
         },
     }
 
@@ -38,7 +39,10 @@ def _catalog_html(items, current_page=1, total_pages=1):
 
 @responses.activate
 def test_fetch_parses_listings():
-    items = [_item(111, "Onkyo A-9010", amount="390.62", url_slug="111-onkyo-a-9010")]
+    items = [_item(
+        111, "Onkyo A-9010", amount="390.62", url_slug="111-onkyo-a-9010",
+        thumbnail_url="https://images1.vinted.net/t/111.jpg",
+    )]
     responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(items), status=200)
 
     listings = vinted.fetch("onkyo")
@@ -52,6 +56,7 @@ def test_fetch_parses_listings():
     assert listing.url == "https://www.vinted.se/items/111-onkyo-a-9010"
     assert listing.ships is True
     assert listing.location is None
+    assert listing.image_url == "https://images1.vinted.net/t/111.jpg"
     assert len(responses.calls) == 1  # fewer than a full page - no page 2 request
 
 

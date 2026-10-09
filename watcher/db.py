@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS listings (
     included_in_digest_at TEXT,
     stale_notified_at TEXT,
     auction_ends_at TEXT,
+    image_url TEXT,
     raw_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(search_id, source, external_id)
 );
@@ -325,6 +326,20 @@ def _migrate_add_auction_ends_at(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_add_listing_image_url(conn: sqlite3.Connection) -> None:
+    """Adds image_url (see models.Listing) to a listings table created
+    before it existed - a thumbnail URL straight from the marketplace's own
+    response, used by the "Top ads" cards on the searches page. No-op on a
+    fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "listings" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(listings)")}
+    if "image_url" not in columns:
+        conn.execute("ALTER TABLE listings ADD COLUMN image_url TEXT")
+        conn.commit()
+
+
 def _migrate_add_watched_item_currency(conn: sqlite3.Connection) -> None:
     """Adds the currency column to a watched_items table created before
     price_watch.py tracked it (it previously only ever showed "SEK" in
@@ -419,6 +434,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_scoring_mode(conn)
     _migrate_add_digest_style(conn)
     _migrate_add_auction_ends_at(conn)
+    _migrate_add_listing_image_url(conn)
     _migrate_add_watched_item_currency(conn)
     _migrate_add_watched_item_failure_tracking(conn)
     _migrate_add_watched_item_enrichment(conn)

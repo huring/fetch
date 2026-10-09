@@ -160,6 +160,12 @@ class Listing:
     # reuses the fields above as-is: `price` means "current bid requirement"
     # rather than a fixed asking price for these, not a separate concept.
     auction_ends_at: Optional[datetime] = None
+    # A thumbnail/photo URL straight from the marketplace's own response -
+    # every registered source already carries one (confirmed live, 2026-10),
+    # just never extracted before. Never downloaded/stored, same as the
+    # watched-item enrichment image - just linked to by its original URL,
+    # for the "Top ads" cards (backlog item: richer top-ads panel).
+    image_url: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 

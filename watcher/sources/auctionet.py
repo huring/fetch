@@ -58,6 +58,11 @@ def _parse_item(item: Dict[str, Any]) -> Optional[Listing]:
     if condition:
         description = f"{description}\n\nSkick: {condition}" if description else f"Skick: {condition}"
 
+    image_url = ""
+    images = item.get("images")
+    if isinstance(images, list) and images and isinstance(images[0], dict):
+        image_url = images[0].get("w640") or images[0].get("thumb") or ""
+
     ends_at = None
     if item.get("ends_at") is not None:
         ends_at = datetime.fromtimestamp(item["ends_at"], tz=timezone.utc)
@@ -76,6 +81,7 @@ def _parse_item(item: Dict[str, Any]) -> Optional[Listing]:
         ships=None,  # varies per auction house/item - not reliably indicated in the API response
         published_at=published_at,
         auction_ends_at=ends_at,
+        image_url=image_url or None,
         raw=item,
     )
 

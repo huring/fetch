@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from watcher.models import Listing
-from watcher.sources.base import SourceError, get_text
+from watcher.sources.base import SourceError, get_text, image_url_from_jsonld_product
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,7 @@ def _parse_product_page(html: str, url: str) -> Optional[Listing]:
         location=None,  # one shop, ships nationally - no per-listing location
         ships=True,
         published_at=None,
+        image_url=image_url_from_jsonld_product(product) or None,
         raw=product,
     )
 

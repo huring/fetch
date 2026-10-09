@@ -179,10 +179,15 @@ the admin UI just shows the terser "Found"/"Maybe"/"Yes!" instead:
 - **Yes!** - listings scored at or above `SCORE_INSTANT_THRESHOLD`.
 
 The searches page also has an overview panel (this month's Claude cost,
-total scanned/found/"Maybe" counts, and the current top-scoring ads across
-every search) and a **Feed** page (`/feed`) that shows every search's
-"Maybe" (or, toggled, "Yes!") listings together on one page instead of
-clicking into each search individually - filterable to one specific search.
+total scanned/found/"Maybe" counts) and a **Top ads** card grid: the current
+"Yes!" (instant_alert) bucket's listings across every search, each shown
+with its photo (pulled straight from the marketplace's own listing data -
+every registered source has one), a description excerpt, its score, price,
+location and marketplace - not just a bare title/price line, so a standout
+find is actually recognizable at a glance without clicking through. There's
+also a **Feed** page (`/feed`) that shows every search's "Maybe" (or,
+toggled, "Yes!") listings together on one page instead of clicking into each
+search individually - filterable to one specific search.
 
 All three only count currently-active listings - one confirmed sold/removed
 by the daily liveness sweep (see "How it works" above) disappears from every

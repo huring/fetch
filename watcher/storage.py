@@ -40,8 +40,8 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             INSERT INTO listings (
                 search_id, source, external_id, title, description, url,
-                price, lowest_price, location, ships, auction_ends_at, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                price, lowest_price, location, ships, auction_ends_at, image_url, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 search_id,
@@ -55,6 +55,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 listing.location,
                 None if listing.ships is None else int(listing.ships),
                 auction_ends_at,
+                listing.image_url,
                 json.dumps(listing.raw),
             ),
         )
@@ -74,7 +75,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             UPDATE listings SET
                 title = ?, description = ?, url = ?, price = ?, lowest_price = ?,
-                location = ?, ships = ?, auction_ends_at = ?, raw_json = ?, last_seen_at = datetime('now'),
+                location = ?, ships = ?, auction_ends_at = ?, image_url = ?, raw_json = ?, last_seen_at = datetime('now'),
                 score = NULL, reasoning = NULL, uncertain_specs = '[]', price_assessment = NULL,
                 notified_instant_at = NULL, included_in_digest_at = NULL
             WHERE id = ?
@@ -88,6 +89,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 listing.location,
                 None if listing.ships is None else int(listing.ships),
                 auction_ends_at,
+                listing.image_url,
                 json.dumps(listing.raw),
                 listing_id,
             ),
@@ -97,7 +99,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
             """
             UPDATE listings SET
                 title = ?, description = ?, url = ?, price = ?,
-                location = ?, ships = ?, auction_ends_at = ?, raw_json = ?, last_seen_at = datetime('now')
+                location = ?, ships = ?, auction_ends_at = ?, image_url = ?, raw_json = ?, last_seen_at = datetime('now')
             WHERE id = ?
             """,
             (
@@ -108,6 +110,7 @@ def upsert_listing(conn: sqlite3.Connection, search_id: int, listing: Listing) -
                 listing.location,
                 None if listing.ships is None else int(listing.ships),
                 auction_ends_at,
+                listing.image_url,
                 json.dumps(listing.raw),
                 listing_id,
             ),
@@ -400,22 +403,22 @@ def get_overview_stats(conn: sqlite3.Connection, score_digest_min: int, score_in
     }
 
 
-def get_top_listings(conn: sqlite3.Connection, limit: int = 5) -> List[sqlite3.Row]:
-    """The highest-scored currently-active listings across every search, for
-    the searches page's overview panel's "top ads" (backlog item 16). Only
-    AI-rated listings have a meaningful ranking by score - a plain search's
-    surfaced matches (score -1) are never "top", there's nothing to rank them
-    by."""
+def get_top_listings(conn: sqlite3.Connection, score_instant_threshold: int, limit: int = 5) -> List[sqlite3.Row]:
+    """The "Yes!" (instant_alert) bucket's listings across every search, for
+    the searches page's overview panel's "top ads" (backlog item 16) - these
+    are specifically the standout finds, not just whatever's highest-scored
+    if nothing cleared the instant-alert bar. A plain search's surfaced
+    matches (score -1) are never "top", there's nothing to rank them by."""
     return conn.execute(
         """
         SELECT listings.*, searches.name AS search_name
         FROM listings
         JOIN searches ON searches.id = listings.search_id
-        WHERE listings.score BETWEEN 1 AND 10
+        WHERE listings.score >= ?
         ORDER BY listings.score DESC, listings.first_seen_at DESC
         LIMIT ?
         """,
-        (limit,),
+        (score_instant_threshold, limit),
     ).fetchall()
 
 

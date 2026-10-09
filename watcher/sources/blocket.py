@@ -103,6 +103,11 @@ def _parse_ad(ad: dict) -> Optional[Listing]:
     elif isinstance(location_field, str):
         location = location_field
 
+    image_url = ""
+    image_field = ad.get("image")
+    if isinstance(image_field, dict):
+        image_url = image_field.get("url", "")
+
     published_at = None
     list_time = ad.get("timestamp") or ad.get("list_time") or ad.get("published")
     if isinstance(list_time, (int, float)):
@@ -127,6 +132,7 @@ def _parse_ad(ad: dict) -> Optional[Listing]:
         location=location,
         ships=None,  # Blocket's shipping flag isn't confirmed; left to the scorer's judgment.
         published_at=published_at,
+        image_url=image_url or None,
         raw=ad,
     )
 

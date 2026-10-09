@@ -20,6 +20,7 @@ def _item(**overrides):
         location="Karlstad",
         url="https://auctionet.com/sv/5361509-tandberg-tr-2055-receiver-1970-tal",
         hammered=False,
+        images=[{"thumb": "https://images.auctionet.com/thumbs/thumb_5361509.jpg", "w640": "https://images.auctionet.com/thumbs/w640_5361509.jpg"}],
     )
     base.update(overrides)
     return base
@@ -51,6 +52,7 @@ def test_fetch_parses_an_item():
     assert listing.auction_ends_at is not None
     assert listing.auction_ends_at.year == 2026
     assert listing.published_at is not None
+    assert listing.image_url == "https://images.auctionet.com/thumbs/w640_5361509.jpg"
 
 
 @responses.activate

@@ -38,6 +38,20 @@ def test_new_listing_is_pending(conn, search_id):
     assert pending[0]["score"] is None
 
 
+def test_upsert_listing_stores_and_updates_image_url(conn, search_id):
+    listing = make_listing()
+    listing.image_url = "https://example.com/first.jpg"
+    listing_id = storage.upsert_listing(conn, search_id, listing)
+
+    pending = storage.get_pending_listings(conn, search_id)
+    assert pending[0]["image_url"] == "https://example.com/first.jpg"
+
+    listing.image_url = "https://example.com/second.jpg"
+    storage.upsert_listing(conn, search_id, listing)
+    pending = storage.get_pending_listings(conn, search_id)
+    assert pending[0]["image_url"] == "https://example.com/second.jpg"
+
+
 def test_same_price_reseen_does_not_reset_score(conn, search_id):
     listing_id = storage.upsert_listing(conn, search_id, make_listing(price=1000))
     storage.mark_scored(conn, listing_id, 7, "bra skick", [], "rimligt pris")
@@ -289,17 +303,17 @@ def test_get_overview_stats(conn, search_id):
     assert round(stats["monthly_cost_usd"], 4) == 0.0021
 
 
-def test_get_top_listings_only_includes_rated_scores(conn, search_id):
-    low = storage.upsert_listing(conn, search_id, make_listing(external_id="low"))
+def test_get_top_listings_only_includes_instant_alert_bucket(conn, search_id):
+    below_threshold = storage.upsert_listing(conn, search_id, make_listing(external_id="below"))
     high = storage.upsert_listing(conn, search_id, make_listing(external_id="high"))
     plain = storage.upsert_listing(conn, search_id, make_listing(external_id="plain"))
-    storage.mark_scored(conn, low, 4, "r", [], "p")
+    storage.mark_scored(conn, below_threshold, 7, "r", [], "p")  # "Maybe", not "Yes!"
     storage.mark_scored(conn, high, 9, "r", [], "p")
     storage.mark_surfaced_plain(conn, plain)  # score -1, never "top"
 
-    top = storage.get_top_listings(conn, limit=5)
+    top = storage.get_top_listings(conn, score_instant_threshold=8, limit=5)
 
-    assert [row["id"] for row in top] == [high, low]
+    assert [row["id"] for row in top] == [high]
 
 
 def test_list_feed_listings_filters_by_bucket_and_search(conn, search_id):

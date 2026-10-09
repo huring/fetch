@@ -56,7 +56,7 @@ from watcher.notify import slack
 from watcher.scoring.claude_scorer import estimate_cost_usd
 from watcher.scoring.schema import strict_json_schema
 from watcher.settings import Settings
-from watcher.sources.base import extract_jsonld_product, extract_og_image, get_text
+from watcher.sources.base import extract_jsonld_product, extract_og_image, get_text, image_url_from_jsonld_product
 
 logger = logging.getLogger(__name__)
 
@@ -169,18 +169,6 @@ def _maybe_create_linked_search(conn, item: WatchedItem) -> None:
     logger.info("Created linked 'find used' search %r for watched item %r", search.name, item.name)
 
 
-def _image_url_from_jsonld(product_jsonld: Dict[str, Any]) -> str:
-    image = product_jsonld.get("image")
-    if isinstance(image, str):
-        return image
-    if isinstance(image, list) and image:
-        first = image[0]
-        return first if isinstance(first, str) else (first.get("url", "") if isinstance(first, dict) else "")
-    if isinstance(image, dict):
-        return image.get("url", "")
-    return ""
-
-
 def _maybe_send_alert(conn, settings: Settings, item: WatchedItem, price: int, dry_run: bool) -> bool:
     if item.target_price is None or price > item.target_price:
         return False
@@ -251,7 +239,7 @@ def check_item(conn, client: Anthropic, settings: Settings, item: WatchedItem, d
         _maybe_send_dead_alert(conn, settings, item, failures, dry_run)
         return {"checked": True, "alerted": False}
 
-    image_url = (_image_url_from_jsonld(product_jsonld) if product_jsonld else "") or extract_og_image(html)
+    image_url = (image_url_from_jsonld_product(product_jsonld) if product_jsonld else "") or extract_og_image(html)
     # Stored regardless of stock status (still useful to know what an
     # out-of-stock item is priced at) - in_stock is the separate signal for
     # whether it's actually purchasable right now, used below to gate

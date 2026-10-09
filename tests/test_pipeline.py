@@ -102,6 +102,7 @@ def make_listing(external_id, title, price=1000, description=""):
         ships=None,
         published_at=None,
         auction_ends_at=None,
+        image_url=None,
         raw={},
     )
 
@@ -482,12 +483,12 @@ def test_run_search_cycle_uses_each_row_s_own_marketplace_for_enrichment():
     blocket_listing = SimpleNamespace(
         source="blocket", external_id="1", title="Onkyo A", description="",
         price=1000, url="https://example.com/1", location=None, ships=None,
-        published_at=None, auction_ends_at=None, raw={},
+        published_at=None, auction_ends_at=None, image_url=None, raw={},
     )
     vinted_listing = SimpleNamespace(
         source="vinted", external_id="2", title="Onkyo B", description="",
         price=1000, url="https://example.com/2", location=None, ships=None,
-        published_at=None, auction_ends_at=None, raw={},
+        published_at=None, auction_ends_at=None, image_url=None, raw={},
     )
 
     with patch("watcher.sources.blocket.fetch", return_value=[blocket_listing]):

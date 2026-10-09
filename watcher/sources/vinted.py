@@ -163,6 +163,7 @@ def _parse_item(entry: Dict[str, Any]) -> Optional[Listing]:
         location=None,  # Vinted has no city/region data in search results
         ships=True,  # Vinted is shipping-only by design
         published_at=None,  # not present in search results
+        image_url=item.get("thumbnailUrl") or None,
         raw=item,
     )
 

@@ -1,4 +1,4 @@
-from watcher.sources.base import extract_jsonld_product, extract_og_image
+from watcher.sources.base import extract_jsonld_product, extract_og_image, image_url_from_jsonld_product
 
 
 def test_extract_jsonld_product_finds_product_block_among_others():
@@ -51,3 +51,11 @@ def test_extract_og_image_finds_content_then_property_order():
 
 def test_extract_og_image_returns_empty_when_absent():
     assert extract_og_image("<html><head></head></html>") == ""
+
+
+def test_image_url_from_jsonld_product_handles_string_list_and_dict_shapes():
+    assert image_url_from_jsonld_product({"image": "https://example.com/a.jpg"}) == "https://example.com/a.jpg"
+    assert image_url_from_jsonld_product({"image": ["https://example.com/b.jpg", "https://example.com/c.jpg"]}) == "https://example.com/b.jpg"
+    assert image_url_from_jsonld_product({"image": {"url": "https://example.com/d.jpg"}}) == "https://example.com/d.jpg"
+    assert image_url_from_jsonld_product({"image": [{"url": "https://example.com/e.jpg"}]}) == "https://example.com/e.jpg"
+    assert image_url_from_jsonld_product({}) == ""

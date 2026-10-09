@@ -4,6 +4,16 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Reworked "Top ads" into a richer card grid, scoped to the "Yes!" bucket**
+  - previously it was a bare title/score/price text list that could include
+  "Maybe"-tier listings too if too few "Yes!" ones existed (it just took the
+  overall top 5 by score). Now it's strictly the instant_alert bucket, shown
+  as cards: a photo (every registered marketplace's own API/page data
+  already carries one - Blocket, Vinted, Auctionet and Rehifi all now
+  extract it, never downloaded/stored, just linked to), a description
+  excerpt, the score, price, location and marketplace name - a standout find
+  is recognizable at a glance instead of needing a click-through to see
+  anything but a title.
 - **Watched items: keep the price even when out of stock, and show a
   distinct "blocked" badge for sites that actively reject scraping** - found
   while debugging two live reports. First: a watched item showed its new
