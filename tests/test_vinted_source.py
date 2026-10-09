@@ -1,9 +1,18 @@
 import json
 
 import responses
+from responses import matchers
 
 from watcher.sources import vinted
 from watcher.sources.base import SourceError
+
+
+def _search_match(q, page=1):
+    """See test_blocket_source.py's _search_match - same reasoning
+    (backlog #28): without matching on the query string too, a stray real
+    request from an unrelated test's leftover background thread could
+    consume one of this test's queued mocks."""
+    return [matchers.query_param_matcher({"search_text": q, "order": "newest_first", "page": str(page)})]
 
 
 def _item(item_id, title, amount="500.00", url_slug=None, thumbnail_url=None):
@@ -43,7 +52,7 @@ def test_fetch_parses_listings():
         111, "Onkyo A-9010", amount="390.62", url_slug="111-onkyo-a-9010",
         thumbnail_url="https://images1.vinted.net/t/111.jpg",
     )]
-    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(items), status=200)
+    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(items), status=200, match=_search_match("onkyo", page=1))
 
     listings = vinted.fetch("onkyo")
 
@@ -62,7 +71,7 @@ def test_fetch_parses_listings():
 
 @responses.activate
 def test_fetch_stops_on_empty_page():
-    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html([]), status=200)
+    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html([]), status=200, match=_search_match("nonexistent", page=1))
 
     listings = vinted.fetch("nonexistent")
 
@@ -74,8 +83,8 @@ def test_fetch_stops_on_empty_page():
 def test_fetch_continues_to_next_page_when_full():
     page1_items = [_item(i, f"Item {i}") for i in range(1, vinted.ITEMS_PER_PAGE + 1)]
     page2_items = [_item(9999, "Last item")]
-    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(page1_items), status=200)
-    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(page2_items), status=200)
+    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(page1_items), status=200, match=_search_match("onkyo", page=1))
+    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(page2_items), status=200, match=_search_match("onkyo", page=2))
 
     listings = vinted.fetch("onkyo", max_pages=2)
 
@@ -86,7 +95,7 @@ def test_fetch_continues_to_next_page_when_full():
 @responses.activate
 def test_fetch_skips_item_without_id():
     items = [{"productItem": {"title": "No id item"}}]
-    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(items), status=200)
+    responses.add(responses.GET, vinted.SEARCH_URL, body=_catalog_html(items), status=200, match=_search_match("onkyo", page=1))
 
     listings = vinted.fetch("onkyo")
 
@@ -95,7 +104,7 @@ def test_fetch_skips_item_without_id():
 
 @responses.activate
 def test_fetch_raises_source_error_on_http_failure():
-    responses.add(responses.GET, vinted.SEARCH_URL, status=500)
+    responses.add(responses.GET, vinted.SEARCH_URL, status=500, match=_search_match("onkyo", page=1))
 
     try:
         vinted.fetch("onkyo")

@@ -4,6 +4,21 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Closed the remaining test-suite flakiness gap** (was backlog #28) -
+  `responses.add()` as used throughout the blocket/vinted/auctionet
+  source-adapter tests matched by URL only, so a stray real request from an
+  unrelated test's leftover background thread (now a much rarer event after
+  today's other scheduler fix, but not impossible - a handful of tests still
+  intentionally trigger one via "Run now"/"Check now") could silently
+  consume a mock meant for the test's own call, with a different search
+  phrase, and throw off pagination or call-count assertions in a confusing
+  way. Every search-endpoint mock in those three files now also matches on
+  the exact query string (`responses.matchers.query_param_matcher`) it was
+  written for. Rehifi's own tests didn't need this - its adapter crawls a
+  sitemap and fetches per-product URLs, never a single endpoint with a
+  varying search-phrase query string, so the underlying ambiguity doesn't
+  exist there. Verified with 10 consecutive full-suite runs in a fresh
+  Python 3.12 container.
 - **Fixed the actual cause of test_admin_routes.py's intermittent CI
   failures** (was backlog #22; CHANGELOG also already covers a segfault
   fixed the same day from the same underlying mechanism) - confirmed live

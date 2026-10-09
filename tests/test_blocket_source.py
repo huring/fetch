@@ -1,7 +1,21 @@
 import responses
+from responses import matchers
 
 from watcher.sources import blocket
 from watcher.sources.base import SourceError
+
+
+def _search_match(q, page=1):
+    """A stray real request from an unrelated test's leftover background
+    thread (see test_admin_routes.py's client fixture / backlog #28) hits
+    this same SEARCH_URL too - without matching on the query string as well,
+    `responses` would match purely by URL and could hand that stray request
+    one of *this* test's queued mocks (or vice versa), silently throwing off
+    pagination/call-count assertions."""
+    return [matchers.query_param_matcher({
+        "q": q, "cg": blocket.DEFAULT_CATEGORY, "sc": blocket.DEFAULT_SUB_CATEGORY,
+        "sort": "PUBLISHED_DESC", "page": str(page),
+    })]
 
 
 @responses.activate
@@ -24,8 +38,9 @@ def test_fetch_parses_listings():
             ]
         },
         status=200,
+        match=_search_match("onkyo", page=1),
     )
-    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200)
+    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200, match=_search_match("onkyo", page=2))
 
     listings = blocket.fetch("onkyo")
 
@@ -44,16 +59,11 @@ def test_fetch_parses_listings():
 
 @responses.activate
 def test_fetch_stops_on_empty_page():
-    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200)
+    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200, match=_search_match("nonexistent", page=1))
 
     listings = blocket.fetch("nonexistent")
 
     assert listings == []
-    # Filtered to this call's own q= rather than asserting len(responses.calls)
-    # == 1 outright - a background thread from an unrelated admin-route test
-    # can occasionally still be mid-fetch when this test starts (see
-    # test_admin_routes.py's no_real_marketplace_fetches), which would
-    # otherwise show up as an extra, unrelated call here.
     matching_calls = [c for c in responses.calls if "q=nonexistent" in c.request.url]
     assert len(matching_calls) == 1
 
@@ -65,8 +75,9 @@ def test_fetch_skips_ad_without_id():
         blocket.SEARCH_URL,
         json={"docs": [{"heading": "No id ad"}]},
         status=200,
+        match=_search_match("onkyo", page=1),
     )
-    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200)
+    responses.add(responses.GET, blocket.SEARCH_URL, json={"docs": []}, status=200, match=_search_match("onkyo", page=2))
 
     listings = blocket.fetch("onkyo")
 
@@ -75,7 +86,7 @@ def test_fetch_skips_ad_without_id():
 
 @responses.activate
 def test_fetch_raises_source_error_on_http_failure():
-    responses.add(responses.GET, blocket.SEARCH_URL, status=500)
+    responses.add(responses.GET, blocket.SEARCH_URL, status=500, match=_search_match("onkyo", page=1))
 
     try:
         blocket.fetch("onkyo")

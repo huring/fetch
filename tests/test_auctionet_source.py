@@ -1,7 +1,16 @@
 import responses
+from responses import matchers
 
 from watcher.sources import auctionet
 from watcher.sources.base import SourceError
+
+
+def _search_match(q, page=1):
+    """See test_blocket_source.py's _search_match - same reasoning
+    (backlog #28): without matching on the query string too, a stray real
+    request from an unrelated test's leftover background thread could
+    consume one of this test's queued mocks."""
+    return [matchers.query_param_matcher({"q": q, "locale": "sv", "hammered": "false", "page": str(page)})]
 
 
 def _item(**overrides):
@@ -33,6 +42,7 @@ def test_fetch_parses_an_item():
         auctionet.SEARCH_URL,
         json={"items": [_item()], "pagination": {"current_page": 1, "total_pages": 1, "total_entries": 1}},
         status=200,
+        match=_search_match("receiver", page=1),
     )
 
     listings = auctionet.fetch("receiver")
@@ -68,6 +78,7 @@ def test_fetch_falls_back_to_starting_bid_then_estimate_when_no_next_bid():
             "pagination": {"current_page": 1, "total_pages": 1, "total_entries": 2},
         },
         status=200,
+        match=_search_match("receiver", page=1),
     )
 
     listings = auctionet.fetch("receiver")
@@ -87,6 +98,7 @@ def test_fetch_follows_pagination():
             "pagination": {"current_page": 1, "total_pages": 2, "total_entries": 2},
         },
         status=200,
+        match=_search_match("receiver", page=1),
     )
     responses.add(
         responses.GET,
@@ -96,6 +108,7 @@ def test_fetch_follows_pagination():
             "pagination": {"current_page": 2, "total_pages": 2, "total_entries": 2},
         },
         status=200,
+        match=_search_match("receiver", page=2),
     )
 
     listings = auctionet.fetch("receiver", max_pages=5)
@@ -113,6 +126,7 @@ def test_fetch_stops_at_max_pages():
             "pagination": {"current_page": 1, "total_pages": 5, "total_entries": 100},
         },
         status=200,
+        match=_search_match("receiver", page=1),
     )
 
     listings = auctionet.fetch("receiver", max_pages=1)
@@ -131,6 +145,7 @@ def test_fetch_skips_item_with_no_id():
             "pagination": {"current_page": 1, "total_pages": 1, "total_entries": 1},
         },
         status=200,
+        match=_search_match("receiver", page=1),
     )
 
     listings = auctionet.fetch("receiver")
@@ -140,7 +155,7 @@ def test_fetch_skips_item_with_no_id():
 
 @responses.activate
 def test_fetch_raises_source_error_on_http_failure():
-    responses.add(responses.GET, auctionet.SEARCH_URL, status=500)
+    responses.add(responses.GET, auctionet.SEARCH_URL, status=500, match=_search_match("receiver", page=1))
 
     try:
         auctionet.fetch("receiver")
@@ -156,15 +171,11 @@ def test_fetch_passes_hammered_false_and_locale_sv():
         auctionet.SEARCH_URL,
         json={"items": [], "pagination": {"current_page": 1, "total_pages": 1, "total_entries": 0}},
         status=200,
+        match=_search_match("receiver", page=1),
     )
 
     auctionet.fetch("receiver")
 
-    # Index by the call this test actually cares about (q=receiver) rather
-    # than assuming it's calls[0] - a background thread from an unrelated
-    # admin-route test can occasionally still be mid-fetch when this test
-    # starts (see test_admin_routes.py's no_real_marketplace_fetches), which
-    # would otherwise show up as an extra, earlier call here.
     matching_calls = [c for c in responses.calls if "q=receiver" in c.request.url]
     assert len(matching_calls) == 1
     request_url = matching_calls[0].request.url
