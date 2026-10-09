@@ -11,7 +11,12 @@ def conn(tmp_path):
 
 @pytest.fixture
 def search_id(conn):
-    created = searches.create_search(conn, Search(name="Test search"))
+    # scoring_mode="rated" explicit (not just the model's own default) since
+    # most tests using this fixture call mark_scored - Search's Python-level
+    # default is "plain" (see models.py), so leaving this implicit would
+    # silently stop matching a currently-rated search once storage.py
+    # started checking scoring_mode (see get_top_listings/list_feed_listings).
+    created = searches.create_search(conn, Search(name="Test search", scoring_mode="rated"))
     return created.id
 
 
@@ -316,8 +321,26 @@ def test_get_top_listings_only_includes_instant_alert_bucket(conn, search_id):
     assert [row["id"] for row in top] == [high]
 
 
+def test_get_top_listings_excludes_a_search_switched_from_rated_to_plain(conn, search_id):
+    # Confirmed live (2026-10): switching scoring_mode never touches a
+    # search's existing listings, so an old high score from before the
+    # switch would otherwise keep surfacing here forever, crowding out
+    # genuinely current standouts from searches that are actually rated.
+    stale_high = storage.upsert_listing(conn, search_id, make_listing(external_id="stale-high"))
+    storage.mark_scored(conn, stale_high, 10, "r", [], "p")
+    searches.update_search(conn, search_id, Search(name="Test search", scoring_mode="plain"))
+
+    other_search = searches.create_search(conn, Search(name="Still rated", scoring_mode="rated"))
+    current_high = storage.upsert_listing(conn, other_search.id, make_listing(external_id="current-high"))
+    storage.mark_scored(conn, current_high, 9, "r", [], "p")
+
+    top = storage.get_top_listings(conn, score_instant_threshold=8, limit=5)
+
+    assert [row["id"] for row in top] == [current_high]
+
+
 def test_list_feed_listings_filters_by_bucket_and_search(conn, search_id):
-    search_b = searches.create_search(conn, Search(name="Other search"))
+    search_b = searches.create_search(conn, Search(name="Other search", scoring_mode="rated"))
     roundup_a = storage.upsert_listing(conn, search_id, make_listing(external_id="roundup-a"))
     roundup_b = storage.upsert_listing(conn, search_b.id, make_listing(external_id="roundup-b"))
     alert_a = storage.upsert_listing(conn, search_id, make_listing(external_id="alert-a"))
@@ -336,6 +359,22 @@ def test_list_feed_listings_filters_by_bucket_and_search(conn, search_id):
 
     only_alerts = storage.list_feed_listings(conn, "instant_alert", score_digest_min=5, score_instant_threshold=8)
     assert {row["id"] for row in only_alerts} == {alert_a}
+
+
+def test_list_feed_listings_rated_buckets_exclude_a_search_switched_to_plain(conn, search_id):
+    stale_alert = storage.upsert_listing(conn, search_id, make_listing(external_id="stale-alert"))
+    storage.mark_scored(conn, stale_alert, 9, "r", [], "p")
+    searches.update_search(conn, search_id, Search(name="Test search", scoring_mode="plain"))
+
+    assert storage.list_feed_listings(conn, "instant_alert", score_digest_min=5, score_instant_threshold=8) == []
+    assert storage.list_feed_listings(conn, "daily_roundup", score_digest_min=5, score_instant_threshold=8) == []
+    # "found" is deliberately unaffected by scoring_mode - it means "passed
+    # the deterministic prefilter" regardless of score or current mode, so
+    # both the stale-scored listing and a freshly plain-surfaced one count.
+    plain_match = storage.upsert_listing(conn, search_id, make_listing(external_id="plain-match"))
+    storage.mark_surfaced_plain(conn, plain_match)
+    found = storage.list_feed_listings(conn, "found", score_digest_min=5, score_instant_threshold=8)
+    assert {row["id"] for row in found} == {stale_alert, plain_match}
 
 
 def test_get_ended_auction_listings(conn, search_id):

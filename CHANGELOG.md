@@ -4,6 +4,18 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Fixed "Top ads" (and the feed's "Maybe"/"Yes!" view) showing a stale
+  search's old scores instead of current standouts** - reported live: a
+  search that used to be AI-rated and was later switched to plain kept
+  surfacing its old high-scored listings in "Top ads", crowding out two
+  genuinely current "Yes!" results from searches that are actually rated
+  today. Root cause: `update_search` only ever touches a search's own row -
+  switching scoring_mode never resets or re-evaluates listings it already
+  scored, and `get_top_listings`/`list_feed_listings`'s rated-only buckets
+  were filtering purely on `listings.score`, with no check that the
+  listing's *search* is still rated. Both now also require
+  `searches.scoring_mode = 'rated'`; the "found" bucket is deliberately
+  unaffected, since it's meant to include plain-surfaced matches too.
 - **Closed the remaining test-suite flakiness gap** (was backlog #28) -
   `responses.add()` as used throughout the blocket/vinted/auctionet
   source-adapter tests matched by URL only, so a stray real request from an

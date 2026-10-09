@@ -361,6 +361,14 @@ def list_feed_listings(
     narrowed to one) rather than one search at a time - the cross-search feed
     (backlog item 17)."""
     predicate = _bucket_predicate(bucket, score_digest_min, score_instant_threshold)
+    # "daily_roundup"/"instant_alert" only make sense for a currently rated
+    # search - without this, a search switched from rated to plain can keep
+    # surfacing its old high-scored listings here forever, since
+    # update_search never touches existing listings' scores (same bug as
+    # get_top_listings, see its docstring). "found" deliberately stays
+    # unscoped - it's meant to include both rated and plain-surfaced matches.
+    if bucket in ("daily_roundup", "instant_alert"):
+        predicate += " AND searches.scoring_mode = 'rated'"
     query = f"""
         SELECT listings.*, searches.name AS search_name
         FROM listings
@@ -404,17 +412,28 @@ def get_overview_stats(conn: sqlite3.Connection, score_digest_min: int, score_in
 
 
 def get_top_listings(conn: sqlite3.Connection, score_instant_threshold: int, limit: int = 5) -> List[sqlite3.Row]:
-    """The "Yes!" (instant_alert) bucket's listings across every search, for
-    the searches page's overview panel's "top ads" (backlog item 16) - these
-    are specifically the standout finds, not just whatever's highest-scored
-    if nothing cleared the instant-alert bar. A plain search's surfaced
-    matches (score -1) are never "top", there's nothing to rank them by."""
+    """The "Yes!" (instant_alert) bucket's listings across every currently
+    AI-rated search, for the searches page's overview panel's "top ads"
+    (backlog item 16) - these are specifically the standout finds, not just
+    whatever's highest-scored if nothing cleared the instant-alert bar. A
+    plain search's surfaced matches (score -1) are never "top", there's
+    nothing to rank them by.
+
+    Explicitly scoped to searches.scoring_mode = 'rated' (confirmed live,
+    2026-10, as a real bug otherwise): switching a search from rated to
+    plain doesn't retroactively clear whatever real scores its *existing*
+    listings already had - update_search only touches the search's own row,
+    never its listings. Without this filter, a search that used to be rated
+    can keep surfacing its old high-scored listings here indefinitely, even
+    though it's plain now and nothing has scored anything since - crowding
+    out genuinely current standouts from searches that are actually rated
+    today."""
     return conn.execute(
         """
         SELECT listings.*, searches.name AS search_name
         FROM listings
         JOIN searches ON searches.id = listings.search_id
-        WHERE listings.score >= ?
+        WHERE listings.score >= ? AND searches.scoring_mode = 'rated'
         ORDER BY listings.score DESC, listings.first_seen_at DESC
         LIMIT ?
         """,
