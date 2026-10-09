@@ -4,6 +4,11 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Listing table upgrades**: marketplace favicon instead of a text source
+  name, a small thumbnail column, "kr" suffix on price, search name as a
+  badge under the title (feed only), a location column, click-to-sort
+  column headers, and the feedback detail input now only appears after
+  picking an action.
 - **Fixed the front page's "Top ads" cards ignoring like/not-interested
   feedback** - reported live: a "Yes!" listing dismissed as "not interested"
   (too far away, wouldn't ship) stayed hidden everywhere else but kept

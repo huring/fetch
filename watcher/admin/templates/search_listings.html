@@ -14,14 +14,19 @@
     <table class="w-full text-sm">
         <thead>
             <tr class="text-left text-xs uppercase tracking-wide text-gray-400 border-b border-gray-700">
-                <th class="px-3 py-2">Title</th><th class="px-3 py-2">Price</th>
-                {% if search.scoring_mode == "rated" %}<th class="px-3 py-2">Score</th>{% endif %}
-                <th class="px-3 py-2">Source</th><th class="px-3 py-2">Active for</th><th class="px-3 py-2"></th>
+                <th class="px-3 py-2"></th>
+                <th class="px-3 py-2">{{ t.sort_header("Title", "title", base_url, sort, sort_dir) }}</th>
+                <th class="px-3 py-2">{{ t.sort_header("Price", "price", base_url, sort, sort_dir) }}</th>
+                {% if search.scoring_mode == "rated" %}<th class="px-3 py-2">{{ t.sort_header("Score", "score", base_url, sort, sort_dir) }}</th>{% endif %}
+                <th class="px-3 py-2">{{ t.sort_header("Source", "source", base_url, sort, sort_dir) }}</th>
+                <th class="px-3 py-2">{{ t.sort_header("Location", "location", base_url, sort, sort_dir) }}</th>
+                <th class="px-3 py-2">{{ t.sort_header("Active for", "age", base_url, sort, sort_dir) }}</th>
+                <th class="px-3 py-2"></th>
                 <th class="px-3 py-2">Feedback</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-800">
-        {{ t.listing_rows(listings, dismiss_reasons, dismiss_reason_labels, return_to, search.scoring_mode == "rated", false, 7 if search.scoring_mode == "rated" else 6) }}
+        {{ t.listing_rows(listings, dismiss_reasons, dismiss_reason_labels, return_to, marketplace_icons, marketplace_names, search.scoring_mode == "rated", false, 9 if search.scoring_mode == "rated" else 8) }}
         </tbody>
     </table>
 </div>

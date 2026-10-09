@@ -17,6 +17,8 @@ completed work. Keep them in sync:
      summary) - what changed and why it matters, in plain language. Note
      which backlog number it was, e.g. "(was backlog #16)", for traceability
      back to the original ask.
+  3. Don't be wordy in the changelog or the commit messages, be really brief
+     but clearly explain what has been fixed.
 - A backlog story can be partially done (e.g. bundled with others, or scoped
   down) - only remove it from the backlog once it's actually fully done;
   otherwise leave it and describe the partial progress in the changelog

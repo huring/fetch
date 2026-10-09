@@ -1,7 +1,21 @@
 {# Shared listing table rows for search_listings.html and feed.html, so a
    listing looks and behaves identically whether reached via a search's own
    bucket tabs or via the cross-search feed - same columns, same inline
-   like/not-interested feedback control. #}
+   like/not-interested feedback control, same sortable headers. #}
+
+{% macro sort_header(label, col, base_url, current_sort, current_dir) %}
+{% set next_dir = "desc" if current_sort == col and current_dir != "desc" else "asc" %}
+{% set sep = "&" if "?" in base_url else "?" %}
+{% set href = base_url ~ sep ~ "sort=" ~ col ~ "&dir=" ~ next_dir %}
+<a href="{{ href }}" class="hover:text-gray-200">
+    {{ label }}{% if current_sort == col %}{{ " ▲" if current_dir != "desc" else " ▼" }}{% endif %}
+</a>
+{% endmacro %}
+
+{# The feedback detail input only appears once a real action is picked - a
+   blank placeholder option plus a CSS :has() rule (no JS anywhere in this
+   app) hides it until then, rather than cluttering every row with an input
+   box nobody's about to use yet. #}
 {% macro feedback_cell(l, dismiss_reasons, dismiss_reason_labels, return_to) %}
 {% if l.feedback == "liked" %}
     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-300">&#128077; liked{% if l.feedback_detail %} &mdash; {{ l.feedback_detail }}{% endif %}</span>
@@ -16,28 +30,43 @@
         <button type="submit" class="text-xs text-gray-400 hover:text-gray-200 ml-1">undo</button>
     </form>
 {% else %}
-    <form method="post" action="/searches/{{ l.search_id }}/listings/{{ l.id }}/feedback" class="flex flex-wrap items-center gap-1">
+    <form method="post" action="/searches/{{ l.search_id }}/listings/{{ l.id }}/feedback" class="feedback-form flex flex-wrap items-center gap-1">
         <input type="hidden" name="return_to" value="{{ return_to }}">
-        <select name="action" class="bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-xs">
+        <select name="action" required class="bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-xs">
+            <option value="" selected>Choose...</option>
             <option value="like">&#128077; Like</option>
             {% for key, label in dismiss_reasons %}
             <option value="{{ key }}">&#128078; {{ label }}</option>
             {% endfor %}
         </select>
-        <input type="text" name="detail" placeholder="detail (optional)" class="bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-xs w-28">
+        <input type="text" name="detail" placeholder="detail (optional)" class="feedback-detail bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-xs w-28">
         <button type="submit" class="text-xs text-indigo-300 hover:text-indigo-200">Save</button>
     </form>
 {% endif %}
 {% endmacro %}
 
-{% macro listing_rows(listings, dismiss_reasons, dismiss_reason_labels, return_to, show_score, show_search, colspan) %}
+{% macro listing_rows(listings, dismiss_reasons, dismiss_reason_labels, return_to, marketplace_icons, marketplace_names, show_score, show_search, colspan) %}
 {% for l in listings %}
     <tr>
-        <td class="px-3 py-2"><a href="{{ l.url }}" target="_blank" rel="noopener" class="text-indigo-300 hover:text-indigo-200">{{ l.title }}</a></td>
-        <td class="px-3 py-2">{{ l.price if l.price is not none else "-" }}</td>
+        <td class="px-3 py-2 w-12">
+            {% if l.image_url %}
+            <img src="{{ l.image_url }}" alt="" class="w-10 h-10 object-cover rounded bg-gray-900">
+            {% else %}
+            <div class="w-10 h-10 rounded bg-gray-900"></div>
+            {% endif %}
+        </td>
+        <td class="px-3 py-2">
+            <a href="{{ l.url }}" target="_blank" rel="noopener" class="text-indigo-300 hover:text-indigo-200">{{ l.title }}</a>
+            {% if show_search %}<div class="mt-0.5"><span class="inline-flex px-1.5 py-0.5 rounded text-xs bg-gray-700 text-gray-300">{{ l.search_name }}</span></div>{% endif %}
+        </td>
+        <td class="px-3 py-2">{{ (l.price ~ " kr") if l.price is not none else "-" }}</td>
         {% if show_score %}<td class="px-3 py-2">{{ l.score if l.score is not none else "-" }}</td>{% endif %}
-        {% if show_search %}<td class="px-3 py-2">{{ l.search_name }}</td>{% endif %}
-        <td class="px-3 py-2">{{ l.source }}</td>
+        <td class="px-3 py-2">
+            {% set icon = marketplace_icons.get(l.source) %}
+            {% if icon %}<img src="{{ icon }}" alt="{{ marketplace_names.get(l.source, l.source) }}" title="{{ marketplace_names.get(l.source, l.source) }}" class="w-4 h-4 inline-block align-middle">
+            {% else %}{{ marketplace_names.get(l.source, l.source) }}{% endif %}
+        </td>
+        <td class="px-3 py-2">{{ l.location if l.location else "-" }}</td>
         <td class="px-3 py-2">{{ l.age_days ~ " days" if l.age_days is not none else "-" }}</td>
         <td class="px-3 py-2">{% if l.stale_notified_at %}<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-300">possible offer</span>{% endif %}</td>
         <td class="px-3 py-2">{{ feedback_cell(l, dismiss_reasons, dismiss_reason_labels, return_to) }}</td>

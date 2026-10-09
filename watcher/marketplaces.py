@@ -101,6 +101,12 @@ class Marketplace:
     # selectable by hand via Advanced edit either way, this only changes
     # what's pre-selected for something new.
     enabled_by_default: bool = True
+    # The marketplace's own web domain (e.g. "blocket.se") - used only to
+    # fetch its favicon for the admin UI's listing tables (via Google's
+    # public favicon service, the same "never downloaded/stored, just linked
+    # to" approach already used for a listing's own image_url), never for
+    # fetching/scoring itself.
+    domain: str = ""
 
 
 MARKETPLACES: Dict[str, "Marketplace"] = {}
@@ -118,6 +124,17 @@ def default_marketplace_keys() -> List[str]:
     """Every marketplace a brand-new search should start out with, before
     any user customization - see Marketplace.enabled_by_default."""
     return [key for key, m in MARKETPLACES.items() if m.enabled_by_default]
+
+
+def favicon_url(key: str) -> Optional[str]:
+    """A small favicon for a listing's source marketplace, via Google's
+    public favicon service - lets the admin UI show a recognizable icon
+    instead of spelling out the marketplace name in every row. None if the
+    marketplace isn't registered or has no domain set."""
+    marketplace = MARKETPLACES.get(key)
+    if marketplace is None or not marketplace.domain:
+        return None
+    return f"https://www.google.com/s2/favicons?sz=32&domain={marketplace.domain}"
 
 
 # --- Blocket -----------------------------------------------------------------
@@ -166,6 +183,7 @@ register(
     Marketplace(
         key="blocket",
         display_name="Blocket",
+        domain="blocket.se",
         fetch=_blocket_fetch,
         auth_fields=(),
         category_note=(
@@ -212,6 +230,7 @@ register(
     Marketplace(
         key="vinted",
         display_name="Vinted",
+        domain="vinted.se",
         fetch=_vinted_fetch,
         auth_fields=(),
         category_note=(
@@ -256,6 +275,7 @@ register(
     Marketplace(
         key="rehifi",
         display_name="Rehifi",
+        domain="rehifi.se",
         fetch=_rehifi_fetch,
         auth_fields=(),
         category_note=(
@@ -295,6 +315,7 @@ register(
     Marketplace(
         key="auctionet",
         display_name="Auctionet",
+        domain="auctionet.com",
         fetch=_auctionet_fetch,
         auth_fields=(),
         category_note=(

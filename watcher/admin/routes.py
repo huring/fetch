@@ -19,6 +19,7 @@ from watcher import searches as searches_repo
 from watcher import storage
 from watcher import watched_items as watched_items_repo
 from watcher.marketplaces import MARKETPLACES
+from watcher.marketplaces import favicon_url as marketplace_favicon_url
 from watcher.marketplaces import get as get_marketplace
 from watcher.models import Search, WatchedItem, WatchedModel
 from watcher.scoring import search_builder
@@ -154,16 +155,23 @@ def _age_days(first_seen_at: Optional[str]) -> Optional[int]:
 
 
 @router.get("/searches/{search_id}/listings", response_class=HTMLResponse)
-def search_listings(request: Request, search_id: int, bucket: str = "found"):
+def search_listings(request: Request, search_id: int, bucket: str = "found", sort: Optional[str] = None, dir: str = "asc"):
     conn = request.app.state.conn
     settings = request.app.state.settings
     search = searches_repo.get_search(conn, search_id)
     if search is None or bucket not in storage.BUCKETS:
         return RedirectResponse("/searches", status_code=303)
+    if sort not in storage.SORT_COLUMNS:
+        sort = None
+    if dir not in ("asc", "desc"):
+        dir = "asc"
     rows = storage.list_bucket_listings(
-        conn, search_id, bucket, settings.score_digest_min, settings.score_instant_threshold
+        conn, search_id, bucket, settings.score_digest_min, settings.score_instant_threshold,
+        sort=sort, sort_dir=dir,
     )
     listings = [dict(row, age_days=_age_days(row["first_seen_at"])) for row in rows]
+    base_url = f"/searches/{search_id}/listings?bucket={bucket}"
+    return_to = base_url + (f"&sort={sort}&dir={dir}" if sort else "")
     return templates.TemplateResponse(
         request, "search_listings.html",
         {
@@ -171,7 +179,9 @@ def search_listings(request: Request, search_id: int, bucket: str = "found"):
             "bucket_labels": storage.BUCKET_LABELS,
             "listings": listings, "dismiss_reasons": feedback_taxonomy.DISMISS_REASONS,
             "dismiss_reason_labels": feedback_taxonomy.DISMISS_REASON_LABELS,
-            "return_to": f"/searches/{search_id}/listings?bucket={bucket}",
+            "marketplace_icons": _marketplace_icons(), "marketplace_names": _marketplace_names(),
+            "sort": sort, "sort_dir": dir, "base_url": base_url,
+            "return_to": return_to,
         },
     )
 
@@ -202,23 +212,29 @@ async def set_listing_feedback(request: Request, search_id: int, listing_id: int
 
 
 @router.get("/feed", response_class=HTMLResponse)
-def feed(request: Request, bucket: str = "yes_and_maybe", search_id: str = ""):
+def feed(request: Request, bucket: str = "yes_and_maybe", search_id: str = "", sort: Optional[str] = None, dir: str = "asc"):
     conn = request.app.state.conn
     settings = request.app.state.settings
     if bucket not in storage.FEED_BUCKETS:
         bucket = "yes_and_maybe"
+    if sort not in storage.SORT_COLUMNS:
+        sort = None
+    if dir not in ("asc", "desc"):
+        dir = "asc"
     # The "All searches" <option> submits search_id="" (empty string, not
     # absent) - FastAPI would reject that against an Optional[int] param, so
     # it's taken as a plain string here and parsed by hand instead.
     selected_search_id = int(search_id) if search_id.strip() else None
     rows = storage.list_feed_listings(
-        conn, bucket, settings.score_digest_min, settings.score_instant_threshold, search_id=selected_search_id
+        conn, bucket, settings.score_digest_min, settings.score_instant_threshold, search_id=selected_search_id,
+        sort=sort, sort_dir=dir,
     )
     listings = [dict(row, age_days=_age_days(row["first_seen_at"])) for row in rows]
     all_searches = searches_repo.list_searches(conn)
-    return_to = f"/feed?bucket={bucket}"
+    base_url = f"/feed?bucket={bucket}"
     if selected_search_id is not None:
-        return_to += f"&search_id={selected_search_id}"
+        base_url += f"&search_id={selected_search_id}"
+    return_to = base_url + (f"&sort={sort}&dir={dir}" if sort else "")
     return templates.TemplateResponse(
         request, "feed.html",
         {
@@ -226,6 +242,8 @@ def feed(request: Request, bucket: str = "yes_and_maybe", search_id: str = ""):
             "searches": all_searches, "selected_search_id": selected_search_id,
             "dismiss_reasons": feedback_taxonomy.DISMISS_REASONS,
             "dismiss_reason_labels": feedback_taxonomy.DISMISS_REASON_LABELS,
+            "marketplace_icons": _marketplace_icons(), "marketplace_names": _marketplace_names(),
+            "sort": sort, "sort_dir": dir, "base_url": base_url,
             "return_to": return_to,
         },
     )
@@ -331,6 +349,10 @@ async def update_search(request: Request, search_id: int):
 
 def _marketplace_names() -> Dict[str, str]:
     return {m.key: m.display_name for m in MARKETPLACES.values()}
+
+
+def _marketplace_icons() -> Dict[str, str]:
+    return {key: url for key in MARKETPLACES if (url := marketplace_favicon_url(key)) is not None}
 
 
 def _transcript_from_form(form_data) -> List[Dict[str, str]]:

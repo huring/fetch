@@ -357,13 +357,42 @@ def get_search_bucket_counts(
 # falls back to newest-first, same as before this existed.
 _LISTING_ORDER_BY = "score DESC, distance_km IS NULL, distance_km ASC, first_seen_at DESC"
 
+# Column headers a listing table lets Lars click to sort by (admin UI's
+# search_listings.html/feed.html) - mapped to the underlying column(s) to
+# order by, NULLs always sorted last regardless of direction so an unset
+# price/score/location never dominates one end of the list.
+SORT_COLUMNS = {
+    "title": "title COLLATE NOCASE",
+    "price": "price",
+    "score": "score",
+    "source": "source",
+    "location": "location",
+    "age": "first_seen_at",
+}
+
+
+def _custom_order_by(sort: Optional[str], sort_dir: str, qualify: bool = False) -> Optional[str]:
+    if sort not in SORT_COLUMNS:
+        return None
+    prefix = "listings." if qualify else ""
+    bare_column = SORT_COLUMNS[sort].split(" ", 1)[0]  # strip "COLLATE NOCASE" etc for the NULL check
+    direction = "DESC" if sort_dir == "desc" else "ASC"
+    return f"{prefix}{bare_column} IS NULL, {prefix}{SORT_COLUMNS[sort]} {direction}"
+
 
 def list_bucket_listings(
-    conn: sqlite3.Connection, search_id: int, bucket: str, score_digest_min: int, score_instant_threshold: int
+    conn: sqlite3.Connection,
+    search_id: int,
+    bucket: str,
+    score_digest_min: int,
+    score_instant_threshold: int,
+    sort: Optional[str] = None,
+    sort_dir: str = "asc",
 ) -> List[sqlite3.Row]:
     predicate = _bucket_predicate(bucket, score_digest_min, score_instant_threshold)
+    order_by = _custom_order_by(sort, sort_dir) or _LISTING_ORDER_BY
     return conn.execute(
-        f"SELECT * FROM listings WHERE search_id = ? AND {predicate} ORDER BY {_LISTING_ORDER_BY}",
+        f"SELECT * FROM listings WHERE search_id = ? AND {predicate} ORDER BY {order_by}",
         (search_id,),
     ).fetchall()
 
@@ -406,6 +435,8 @@ def list_feed_listings(
     score_digest_min: int,
     score_instant_threshold: int,
     search_id: Optional[int] = None,
+    sort: Optional[str] = None,
+    sort_dir: str = "asc",
 ) -> List[sqlite3.Row]:
     """Like list_bucket_listings, but across every search at once (optionally
     narrowed to one) rather than one search at a time - the cross-search feed
@@ -435,6 +466,7 @@ def list_feed_listings(
         if bucket in ("daily_roundup", "instant_alert"):
             predicate += " AND searches.scoring_mode = 'rated'"
         order_by = "listings.score DESC, listings.distance_km IS NULL, listings.distance_km ASC, listings.first_seen_at DESC"
+    order_by = _custom_order_by(sort, sort_dir, qualify=True) or order_by
     query = f"""
         SELECT listings.*, searches.name AS search_name
         FROM listings

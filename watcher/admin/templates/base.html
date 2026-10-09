@@ -10,6 +10,10 @@
          load - that runtime JIT compiler is what made the wizard's prompt
          textarea feel laggy (backlog #26, confirmed 2026-10). -->
     <link rel="stylesheet" href="/static/tailwind.css">
+    <!-- Hides a listing feedback form's detail input until an action is
+         actually picked - plain CSS (:has(), no JS anywhere in this app),
+         see _listing_table.html's feedback_cell macro. -->
+    <style>.feedback-form:has(select[name="action"] option[value=""]:checked) .feedback-detail { display: none; }</style>
 </head>
 <body class="dark bg-gray-900 text-gray-100 min-h-screen">
     <nav class="bg-gray-800 border-b border-gray-700">
