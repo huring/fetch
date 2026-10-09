@@ -75,26 +75,16 @@ DECISION_ASK_JSON = json.dumps({"ready_to_finalize": False, "question": "Vilken 
 DECISION_READY_JSON = json.dumps({"ready_to_finalize": True, "question": None})
 
 PROPOSE_SEARCH_JSON = json.dumps({
-    "summary": "En AI-rankad sökning efter Marantz PM6007 och liknande förstärkare, max 3000 kr.",
+    "summary": "En AI-rankad sökning efter Marantz PM6007 och liknande förstärkare.",
     "name": "Marantz PM6007",
-    "scope": "national",
-    "location": "",
-    "require_shipping": False,
-    "max_price": 3000,
-    "min_price": None,
     "scoring_mode": "rated",
-    "instant_alert_price": None,
-    "digest_style": "summary_link",
-    "excluded_models": [],
-    "excluded_words": [],
-    "required_keywords": [],
     "watched_models": [],
     "hard_criteria": [],
     "soft_criteria": [],
-    "search_phrases": ["Marantz PM6007"],
-    "suggested_phrases": ["Yamaha A-S301"],
-    "suggested_phrases_note": "similar integrated amp, same price bracket",
-    "marketplaces": ["blocket"],
+    "search_phrases": [
+        "Marantz PM6007",
+        "[suggested] Yamaha A-S301 - similar integrated amp, same price bracket",
+    ],
 })
 
 
@@ -305,7 +295,7 @@ def test_edit_from_prompt_updates_the_existing_search(client):
 
     client.app.state.client = make_fake_claude_client([DECISION_READY_JSON, PROPOSE_SEARCH_JSON])
     draft_response = submit_wizard_turn(
-        client, f"/searches/{created.id}/edit-from-prompt", {"prompt": "Marantz PM6007, max 3000kr"}
+        client, f"/searches/{created.id}/edit-from-prompt", {"prompt": "Marantz PM6007"}
     )
     draft_json = _extract_hidden_value(draft_response.text, "draft_json")
     transcript = _extract_hidden_value(draft_response.text, "transcript")
@@ -322,7 +312,10 @@ def test_edit_from_prompt_updates_the_existing_search(client):
     assert response.status_code == 303
     updated = searches_repo.get_search(conn, created.id)
     assert updated.name == "Marantz PM6007"
-    assert updated.max_price == 3000
+    # max_price isn't a Claude-generated field (see search_builder's module
+    # docstring) - editing via prompt regenerates phrases/watched_models/
+    # criteria only, leaving a manually-set field like this one alone.
+    assert updated.max_price == 1000
 
 
 def test_searches_list_links_to_the_prompt_wizard(client):

@@ -4,6 +4,27 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
+- **Narrowed what the search builder asks Claude to generate, after the
+  schema-flattening fix still 400'd with the same "Schema is too complex"
+  error** - the previous fix removed nesting but kept all ~20 fields, and
+  that alone wasn't enough; price_watch.py's near-identical mechanism (same
+  model, same synchronous call) already works fine in production with a
+  flat ~5-field schema, so field count - not nesting - was the actual
+  limit. Cut the draft schema down to exactly what Lars said he actually
+  wants AI help with: search phrases (including comparable-model
+  suggestions, now encoded as a "[suggested] ..." prefix within the one
+  phrase list rather than a separate field, to keep the count down),
+  watched models, and hard/soft criteria - 4 fields total, in the same
+  range as price_watch.py's proven one. Every other field (scope, location,
+  price limits, which marketplaces, digest style) now gets a plain default
+  (no restriction, every registered marketplace) instead of being asked of
+  Claude, and stays adjustable via the existing Advanced/manual form -
+  editing an existing search via its prompt now correctly preserves those
+  fields as they currently stand rather than blanking them back to
+  defaults, which the previous field-removal would otherwise have silently
+  done. Still not verified against the real Anthropic API from this
+  environment (no key available here) - please confirm generation actually
+  completes this time.
 - **Fixed the search builder's generation call failing outright with
   "Schema is too complex"** - reported live right after shipping the 504
   fix below: Claude's API rejected the request with a 400 the moment the

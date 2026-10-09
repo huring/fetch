@@ -300,11 +300,15 @@ def build_wizard_turn_context(
         }
 
     draft = turn.propose_search
+    phrases = search_builder.parsed_phrases(draft)
+    base = searches_repo.get_search(conn, search_id) if search_id is not None else None
+    effective_marketplaces = search_builder.draft_to_search(draft, base=base).marketplaces
     return {
-        "stage": "draft", "draft": draft, "draft_json": draft.model_dump_json(),
+        "stage": "draft", "draft": draft, "draft_json": draft.model_dump_json(), "phrases": phrases,
         "transcript_json": json.dumps(transcript), "counts": None, "name_error": None,
-        "name_value": draft.name, "checked_indices": set(range(len(search_builder.all_draft_phrases(draft)))),
+        "name_value": draft.name, "checked_indices": set(range(len(phrases))),
         "search_id": search_id, "marketplace_names": _marketplace_names(),
+        "effective_marketplaces": effective_marketplaces,
     }
 
 
@@ -342,12 +346,14 @@ def _handle_draft_action(request: Request, form_data, search_id: Optional[int]) 
     conn = request.app.state.conn
     settings = request.app.state.settings
     draft = search_builder.ProposeSearch.model_validate_json(form_data.get("draft_json"))
+    phrases = search_builder.parsed_phrases(draft)
     name = (form_data.get("name") or draft.name).strip() or draft.name
     checked_indices = {int(i) for i in form_data.getlist("phrase_included")}
-    included_phrases = [p for i, p in enumerate(search_builder.all_draft_phrases(draft)) if i in checked_indices]
+    included_phrases = [p.text for i, p in enumerate(phrases) if i in checked_indices]
     transcript_json = form_data.get("transcript", "[]")
 
-    search = search_builder.draft_to_search(draft, included_phrases=included_phrases)
+    base = searches_repo.get_search(conn, search_id) if search_id is not None else None
+    search = search_builder.draft_to_search(draft, included_phrases=included_phrases, base=base)
     search.name = name
 
     if form_data.get("do") == "preview":
@@ -355,10 +361,11 @@ def _handle_draft_action(request: Request, form_data, search_id: Optional[int]) 
         return templates.TemplateResponse(
             request, "search_prompt_wizard.html",
             {
-                "stage": "draft", "draft": draft, "draft_json": form_data.get("draft_json"),
+                "stage": "draft", "draft": draft, "draft_json": form_data.get("draft_json"), "phrases": phrases,
                 "transcript_json": transcript_json, "counts": counts, "name_error": None,
                 "name_value": name, "checked_indices": checked_indices,
                 "search_id": search_id, "marketplace_names": _marketplace_names(),
+                "effective_marketplaces": search.marketplaces,
             },
         )
 
@@ -372,8 +379,9 @@ def _handle_draft_action(request: Request, form_data, search_id: Optional[int]) 
         return templates.TemplateResponse(
             request, "search_prompt_wizard.html",
             {
-                "stage": "draft", "draft": draft, "draft_json": form_data.get("draft_json"),
+                "stage": "draft", "draft": draft, "draft_json": form_data.get("draft_json"), "phrases": phrases,
                 "transcript_json": transcript_json, "counts": None,
+                "effective_marketplaces": search.marketplaces,
                 "name_error": f'A search named "{name}" already exists - choose a different name.',
                 "name_value": name, "checked_indices": checked_indices,
                 "search_id": search_id, "marketplace_names": _marketplace_names(),

@@ -4,9 +4,10 @@
 <h1 class="text-xl font-semibold mb-4">{{ "Edit" if is_edit else "New" }} search</h1>
 {% if built_from_prompt %}
 <p class="mb-4 px-4 py-3 rounded-lg bg-amber-900/40 border border-amber-700 text-amber-200 text-sm">
-    This search was generated from a prompt. Editing fields here directly is fine, but if you later
+    This search was generated from a prompt. Editing fields here directly is fine - if you later
     <a href="/searches/{{ search_id }}/edit-from-prompt" class="underline">edit it via its prompt</a> again,
-    the whole search is regenerated from scratch and any manual changes made here will be lost.
+    only the search phrases, watched models and hard/soft criteria get regenerated; everything else
+    (including anything you change here) is left as-is.
 </p>
 {% endif %}
 <form method="post" action="{{ action_url }}" class="space-y-4">

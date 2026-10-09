@@ -1,9 +1,13 @@
-"""Turns a free-text prompt (backlog #21) into a fully-configured Search,
-instead of hand-filling the ~15-field manual form.
+"""Turns a free-text prompt (backlog #21) into a Search's search_phrases,
+watched_models, hard_criteria and soft_criteria - the fields that actually
+benefit from an LLM's judgement (comparable models/brands, pricing, turning
+prose into a criteria list) - instead of hand-typing them into the manual
+form. Every other field (scope, location, price bounds, marketplaces,
+digest style, etc.) gets a plain default and is left for the manual/
+Advanced form, which already exists for exactly this.
 
 This is a short back-and-forth, not one call: Claude can either ask a
-clarifying question (genuinely blocked - e.g. no price ceiling and no
-indication it's meant to be unlimited - or offering something non-trivial
+clarifying question (genuinely blocked, or offering something non-trivial
 the prompt didn't address either way, like whether to also search for
 comparable models) or propose a finished draft. The caller (admin/routes.py)
 drives this loop turn by turn across page loads, carrying the transcript in
@@ -12,26 +16,25 @@ consistent with the rest of this server-rendered (no JS) admin app.
 
 Each external "turn" is actually up to two Claude calls internally: a tiny
 "decide" call (ready to finalize, or what to ask) and, once ready, a
-separate "finalize" call that produces the full draft. Originally this was
-one combined call whose schema could represent either outcome in the same
-response - simpler code, but confirmed live (2026-10) to 400 with "Schema is
-too complex" once the draft schema grew nested arrays-of-objects (phrase
-provenance, watched models) alongside the question schema in the same
-request. Splitting into two calls means neither individual schema ever has
-to represent both outcomes at once, which is also why the draft schema
-itself (ProposeSearch) uses flat string lists rather than nested objects for
-search_phrases/watched_models, even on its own - encoding provenance/ a
-watched model's fields as plain strings ("pattern | note | good price |
-ideal", the same convention the manual form's textarea already uses) rather
-than a list of sub-objects. Both calls use structured-output
-(client.messages.create with output_config.format - the same mechanism
-claude_scorer.py and price_watch.py already use), not Anthropic tool-use.
+separate "finalize" call that produces the draft. Both use structured
+output (client.messages.create with output_config.format - the same
+mechanism claude_scorer.py and price_watch.py already use), not Anthropic
+tool-use.
+
+Field count, not nesting, is what actually mattered for Anthropic's
+"Schema is too complex" 400 (confirmed live, 2026-10): the original
+20-field draft schema failed even after removing every nested object in
+favor of flat string lists, while price_watch.py's near-identical
+mechanism already works fine in production with a flat ~5-field schema.
+This version's draft schema has 4 fields - comfortably in that same
+working range. If a genuinely bigger schema is ever needed again, grow it
+incrementally and watch for this same error rather than assuming nesting
+is the risk.
 """
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, NamedTuple, Optional
 
 from anthropic import Anthropic
 from pydantic import BaseModel, Field
@@ -40,7 +43,6 @@ from watcher.models import Search, WatchedModel
 from watcher.scoring.claude_scorer import estimate_cost_usd
 from watcher.scoring.schema import strict_json_schema
 from watcher.settings import Settings
-from watcher.sources.blocket_geo import COUNTY_CODE
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,12 @@ MAX_TOKENS = 2048
 # turning into an endless back-and-forth; Claude is told to use its best
 # judgement for anything still unresolved once forced.
 MAX_QUESTION_ROUNDS = 4
+# Marks a search_phrases line as Claude's own comparable addition rather
+# than something the prompt asked for directly, optionally followed by
+# " - a short reason", e.g. "[suggested] Yamaha A-S301 - similar integrated amp".
+# Encoded this way (one field, not a separate suggested_phrases list) to
+# keep the draft schema's field count down - see module docstring.
+SUGGESTED_PREFIX = "[suggested] "
 
 
 class AskUser(BaseModel):
@@ -62,53 +70,30 @@ class ProposeSearch(BaseModel):
         "this search is configured and why - plain language, not a restatement of the raw fields."
     )
     name: str = Field(description="A short, human-readable name for this search.")
-    scope: Literal["local", "national"] = Field(description="'local' only if the prompt implies a specific place.")
-    location: str = Field(
-        default="",
-        description="Required if scope is 'local'. Use an exact Swedish county (län) name when the prompt's "
-        "place maps to one - that gets real server-side filtering on Blocket - otherwise a city/area name "
-        "still works, just less precisely. Empty for 'national'.",
-    )
-    require_shipping: bool = Field(default=False, description="True if the prompt implies shipping matters (mainly relevant for 'national' scope).")
-    max_price: Optional[int] = Field(default=None, description="SEK. Null for no ceiling - don't invent one.")
-    min_price: Optional[int] = Field(default=None, description="SEK. Null for no floor - only set if cheap listings should be screened out.")
     scoring_mode: Literal["plain", "rated"] = Field(
-        description="'rated': Claude scores every match against criteria below - use whenever the prompt "
-        "expresses a quality judgement, preference, or a target to compare against. 'plain': a simple list "
-        "with only deterministic filters below, no AI judgement - use for a bare 'show me everything matching X'."
+        description="'rated': hard_criteria/soft_criteria/watched_models below are used to score and reason "
+        "about every match - use whenever the prompt expresses a quality judgement, preference, or a target "
+        "to compare against. 'plain': a simple list with no AI judgement at all - use for a bare 'show me "
+        "everything matching X', and leave hard_criteria/soft_criteria/watched_models empty in that case."
     )
-    instant_alert_price: Optional[int] = Field(
-        default=None, description="Plain mode only: a match at or below this price alerts immediately. Null if not mentioned."
+    search_phrases: List[str] = Field(
+        description="At least one, one per line. Each is either exactly what the prompt asked for, or - if "
+        f"you're adding a comparable option beyond what was explicitly asked (e.g. another brand/model with "
+        f'a similar spec) - prefixed "{SUGGESTED_PREFIX}" plus " - a short reason", e.g. "Marantz PM6007" or '
+        f'"{SUGGESTED_PREFIX}Yamaha A-S301 - similar integrated amp, same price bracket". Only add a '
+        "suggested one when it's genuinely useful and the prompt didn't already say whether to include "
+        "alternatives - see the system prompt."
     )
-    digest_style: Literal["itemized", "summary_link"] = Field(
-        default="summary_link",
-        description="'itemized' lists every digest match; 'summary_link' collapses them into one line - use "
-        "'summary_link' for a search likely to generate a lot of matches, 'itemized' otherwise.",
-    )
-    excluded_models: List[str] = Field(default_factory=list, description="Wildcard patterns for models to exclude entirely, e.g. 'TX-SR6*'.")
-    excluded_words: List[str] = Field(default_factory=list, description="Words that disqualify a listing if present in its title/description.")
-    required_keywords: List[str] = Field(default_factory=list, description="At least one of these must appear - leave empty to require none.")
     watched_models: List[str] = Field(
         default_factory=list,
-        description='Rated mode only, usually empty. One line per watched model: "pattern | note | good '
-        'price | ideal" - the last part is the literal word "ideal" only for the single buy-it-now/grail '
-        "target if the prompt describes one (a match at or below its good price scores 10/10 and becomes "
-        "the benchmark everything else is judged against), omitted otherwise, e.g. "
+        description="Rated mode only, usually empty. One line per watched model: "
+        '"pattern | note | good price | ideal" - the last part is the literal word "ideal" only for the '
+        "single buy-it-now/grail target if the prompt describes one (a match at or below its good price "
+        "scores 10/10 and becomes the benchmark everything else is judged against), omitted otherwise, e.g. "
         '"TX-NR6* | solid mid-range Onkyo | 1500-2500 SEK |" or "RTX 4080 | the one I actually want | 7000-8000 SEK | ideal".',
     )
-    hard_criteria: List[str] = Field(default_factory=list, description="Rated mode only: requirements a match must satisfy, free text.")
-    soft_criteria: List[str] = Field(default_factory=list, description="Rated mode only: nice-to-haves that boost score without disqualifying.")
-    search_phrases: List[str] = Field(description="Phrases taken directly from the prompt - at least one.")
-    suggested_phrases: List[str] = Field(
-        default_factory=list,
-        description="Comparable/similar phrases YOU added beyond what the prompt explicitly asked for "
-        "(e.g. other brands/models with a similar spec) - empty if none. Shown to the user as suggestions "
-        "they can remove before saving, never silently merged into search_phrases.",
-    )
-    suggested_phrases_note: str = Field(
-        default="", description="If suggested_phrases is non-empty, one short sentence explaining why they're comparable. Empty otherwise."
-    )
-    marketplaces: List[str] = Field(description="Registry keys of the marketplaces this should run on - see the system prompt for which exist and what they carry.")
+    hard_criteria: List[str] = Field(default_factory=list, description="Rated mode only: requirements a match must satisfy, free text, one per line.")
+    soft_criteria: List[str] = Field(default_factory=list, description="Rated mode only: nice-to-haves that boost score without disqualifying, one per line.")
 
 
 class BuilderTurn(BaseModel):
@@ -141,30 +126,15 @@ _DECISION_SCHEMA = strict_json_schema(_Decision.model_json_schema())
 _PROPOSE_SCHEMA = strict_json_schema(ProposeSearch.model_json_schema())
 
 
-def _marketplace_catalog_text() -> str:
-    # Imported lazily (not at module load) to avoid a brittle import-order
-    # dependency - marketplaces.py doesn't import this module, so there's no
-    # real cycle, but every other call in this file is a plain function body,
-    # and this keeps the one registry read in the same style.
-    from watcher.marketplaces import MARKETPLACES
-
-    lines = []
-    for m in MARKETPLACES.values():
-        kind = "live auction" if m.is_auction else "fixed-price classifieds"
-        lines.append(f'- "{m.key}" ({m.display_name}, {kind}): {m.category_note}')
-    return "\n".join(lines)
-
-
-def _county_list_text() -> str:
-    return ", ".join(sorted(COUNTY_CODE.keys()))
-
-
 def _system_prompt() -> str:
     return (
         "You are helping configure a search for Fetch, a personal secondhand-marketplace watcher, from a "
-        "free-text request (most likely Swedish). You'll be asked, separately, whether you're ready to "
-        "finalize (and if not, what to ask) and then to actually produce the finished search - never "
-        "partial fields or placeholders either way.\n\n"
+        "free-text request (most likely Swedish). You only ever produce: a name, whether this should be "
+        "AI-rated or a plain list, the search phrases to run, and (rated mode only) watched models and "
+        "hard/soft criteria - every other setting (location, price limits, which marketplaces, etc.) is "
+        "configured separately afterward, not by you. You'll be asked, separately, whether you're ready to "
+        "finalize (and if not, what to ask) and then to actually produce the finished draft - never partial "
+        "fields or placeholders either way.\n\n"
         "When to ask vs. just proceed: ask only when genuinely blocked (the prompt is contradictory, or a "
         "choice meaningfully changes the result and there's no reasonable default) or when you want to offer "
         "something non-trivial the prompt didn't address - most commonly, suggesting comparable/similar "
@@ -174,21 +144,12 @@ def _system_prompt() -> str:
         "else, just need exactly this part\"), don't suggest alternatives at all. Otherwise, use a sensible "
         "default and proceed rather than asking - most prompts should resolve in one turn.\n\n"
         "Field guidance beyond what's in the schema itself:\n"
-        "- scope/location: 'local' only if a place is implied. Swedish counties Blocket can filter on "
-        f"precisely: {_county_list_text()}. Prefer one of these exact names when the prompt's place maps to "
-        "one (even a city - use the county it's in); a city/area name works too, just less precisely.\n"
         "- scoring_mode: 'rated' whenever the prompt expresses a preference, quality bar, or a specific "
-        "target to judge other listings against; 'plain' for a bare 'show me everything matching X'.\n"
-        "- marketplaces - registered options and what each actually carries:\n"
-        f"{_marketplace_catalog_text()}\n"
-        "  Pick whichever plausibly carry this category of item; if genuinely unsure, include all of them "
-        "rather than asking just to narrow the list - the deterministic filters and (for rated searches) "
-        "Claude's own scoring still apply downstream, so a mismatched marketplace costs nothing but a few "
-        "extra listings to filter past.\n"
-        "- search_phrases vs suggested_phrases: search_phrases is only what the prompt directly asked for; "
-        "a comparable addition of your own goes in suggested_phrases instead, with one shared reason in "
-        "suggested_phrases_note - never mix the two.\n"
-        "- summary: a few plain-language sentences for a human reading a confirmation screen, not a JSON dump."
+        "target to judge other listings against; 'plain' for a bare 'show me everything matching X' - in "
+        "that case leave watched_models/hard_criteria/soft_criteria empty, they're not used.\n"
+        "- summary: a few plain-language sentences for a human reading a confirmation screen, not a JSON "
+        "dump - it's fine (and worth doing) to mention that location/price/marketplace settings use "
+        "defaults they can adjust afterward, since you don't set those yourself."
     )
 
 
@@ -270,6 +231,35 @@ def run_turn(
     return BuilderTurn(action="propose_search", propose_search=draft)
 
 
+class ParsedPhrase(NamedTuple):
+    text: str
+    suggested: bool
+    note: str
+
+
+def parsed_phrases(draft: ProposeSearch) -> List[ParsedPhrase]:
+    """Splits each search_phrases line into (text, suggested, note) - see
+    SUGGESTED_PREFIX. Blank lines are dropped."""
+    result = []
+    for line in draft.search_phrases:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith(SUGGESTED_PREFIX):
+            rest = line[len(SUGGESTED_PREFIX):]
+            text, _, note = rest.partition(" - ")
+            result.append(ParsedPhrase(text=text.strip(), suggested=True, note=note.strip()))
+        else:
+            result.append(ParsedPhrase(text=line, suggested=False, note=""))
+    return result
+
+
+def all_draft_phrases(draft: ProposeSearch) -> List[str]:
+    """The plain text of every parsed phrase, in order - what the admin UI's
+    phrase checkboxes (and draft_to_search's included_phrases) index into."""
+    return [p.text for p in parsed_phrases(draft)]
+
+
 def _parse_watched_model_line(line: str) -> Optional[WatchedModel]:
     parts = [p.strip() for p in line.split("|")]
     pattern = parts[0] if parts else ""
@@ -281,40 +271,35 @@ def _parse_watched_model_line(line: str) -> Optional[WatchedModel]:
     return WatchedModel(pattern=pattern, note=note, good_price=good_price, is_ideal=is_ideal)
 
 
-def draft_to_search(draft: ProposeSearch, *, included_phrases: Optional[List[str]] = None) -> Search:
-    """Flattens a ProposeSearch draft into a real Search. `included_phrases`,
-    if given, is the exact phrase text list to keep from
-    search_phrases + suggested_phrases combined (the admin UI lets the user
-    uncheck suggested ones before creating); omitted, every phrase is kept."""
-    all_phrases = list(draft.search_phrases) + list(draft.suggested_phrases)
-    phrases = included_phrases if included_phrases is not None else all_phrases
+def draft_to_search(draft: ProposeSearch, *, included_phrases: Optional[List[str]] = None, base: Optional[Search] = None) -> Search:
+    """Turns a ProposeSearch draft into a real Search. `included_phrases`,
+    if given, is the exact phrase text list to keep (the admin UI lets the
+    user uncheck suggested ones before creating); omitted, every phrase is
+    kept.
+
+    `base`, when editing an existing search via prompt, is that search as it
+    currently stands - its fields the draft doesn't cover (scope, location,
+    price limits, marketplaces, etc. - see module docstring) are kept as-is
+    rather than reset to blank defaults, since the draft was never asked to
+    produce them and has no opinion on them either way. Omitted (a brand new
+    search), those fields get the same default a fresh manual-form search
+    would, with marketplaces defaulting to every registered one."""
+    phrases = included_phrases if included_phrases is not None else all_draft_phrases(draft)
     watched_models = [m for m in (_parse_watched_model_line(line) for line in draft.watched_models) if m is not None]
-    return Search(
-        name=draft.name,
-        scope=draft.scope,
-        location=draft.location,
-        require_shipping=draft.require_shipping,
-        max_price=draft.max_price,
-        min_price=draft.min_price,
-        scoring_mode=draft.scoring_mode,
-        instant_alert_price=draft.instant_alert_price,
-        digest_style=draft.digest_style,
-        excluded_models=draft.excluded_models,
-        excluded_words=draft.excluded_words,
-        required_keywords=draft.required_keywords,
-        watched_models=watched_models,
-        hard_criteria=draft.hard_criteria,
-        soft_criteria=draft.soft_criteria,
-        search_phrases=phrases,
-        marketplaces=draft.marketplaces,
-    )
+    search = base.model_copy(deep=True) if base is not None else Search(name=draft.name, marketplaces=_all_marketplace_keys())
+    search.name = draft.name
+    search.scoring_mode = draft.scoring_mode
+    search.watched_models = watched_models
+    search.hard_criteria = draft.hard_criteria
+    search.soft_criteria = draft.soft_criteria
+    search.search_phrases = phrases
+    return search
 
 
-def all_draft_phrases(draft: ProposeSearch) -> List[str]:
-    """search_phrases + suggested_phrases, in the one combined order the
-    admin UI's phrase checkboxes (and draft_to_search's included_phrases)
-    index into - see search_prompt_wizard.html."""
-    return list(draft.search_phrases) + list(draft.suggested_phrases)
+def _all_marketplace_keys() -> List[str]:
+    from watcher.marketplaces import MARKETPLACES
+
+    return list(MARKETPLACES.keys())
 
 
 def collapse_transcript_to_prompt(transcript: List[Dict[str, str]]) -> str:

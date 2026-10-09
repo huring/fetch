@@ -68,26 +68,16 @@ DECISION_READY_JSON = json.dumps({"ready_to_finalize": True, "question": None})
 # Claude actually returns (see module docstring: that's exactly what used to
 # make the combined schema "too complex", confirmed live, 2026-10).
 PROPOSE_SEARCH_JSON = json.dumps({
-    "summary": "En AI-rankad sökning efter Marantz PM6007 och liknande förstärkare, max 3000 kr.",
+    "summary": "En AI-rankad sökning efter Marantz PM6007 och liknande förstärkare.",
     "name": "Marantz PM6007",
-    "scope": "national",
-    "location": "",
-    "require_shipping": False,
-    "max_price": 3000,
-    "min_price": None,
     "scoring_mode": "rated",
-    "instant_alert_price": None,
-    "digest_style": "summary_link",
-    "excluded_models": [],
-    "excluded_words": [],
-    "required_keywords": [],
     "watched_models": ["Marantz PM6007 | grail target | 2000-3000 SEK | ideal"],
     "hard_criteria": [],
     "soft_criteria": [],
-    "search_phrases": ["Marantz PM6007"],
-    "suggested_phrases": ["Yamaha A-S301"],
-    "suggested_phrases_note": "similar integrated amp, same price bracket",
-    "marketplaces": ["blocket", "vinted"],
+    "search_phrases": [
+        "Marantz PM6007",
+        "[suggested] Yamaha A-S301 - similar integrated amp, same price bracket",
+    ],
 })
 
 # This is still a full BuilderTurn envelope, not a raw "decide" response -
@@ -120,8 +110,8 @@ def test_run_turn_returns_propose_search_after_decide_and_finalize():
 
     assert turn.action == "propose_search"
     assert turn.propose_search.name == "Marantz PM6007"
-    assert turn.propose_search.search_phrases == ["Marantz PM6007"]
-    assert turn.propose_search.suggested_phrases == ["Yamaha A-S301"]
+    assert turn.propose_search.search_phrases[0] == "Marantz PM6007"
+    assert turn.propose_search.search_phrases[1].startswith("[suggested] Yamaha A-S301")
     assert len(client._calls) == 2
 
 
@@ -187,13 +177,40 @@ def test_all_draft_phrases_combines_explicit_and_suggested_in_order():
 
 
 def test_draft_to_search_flattens_all_phrases_by_default():
+    from watcher.marketplaces import MARKETPLACES
+
     draft = ProposeSearch.model_validate_json(PROPOSE_SEARCH_JSON)
     search = draft_to_search(draft)
 
     assert search.search_phrases == ["Marantz PM6007", "Yamaha A-S301"]
-    assert search.marketplaces == ["blocket", "vinted"]
-    assert search.max_price == 3000
     assert search.scoring_mode == "rated"
+    # Not a Claude-generated field (see module docstring) - defaults to
+    # every registered marketplace, adjustable afterward via Advanced edit.
+    assert set(search.marketplaces) == set(MARKETPLACES.keys())
+
+
+def test_draft_to_search_with_a_base_preserves_its_non_generated_fields():
+    """Editing an existing search via prompt must not silently blank out
+    scope/location/price/marketplaces/etc. just because the draft schema
+    doesn't cover them (see module docstring) - it should only replace the
+    fields Claude actually generates."""
+    from watcher.models import Search
+
+    existing = Search(
+        id=7, name="Old name", scope="local", location="Norrbotten", max_price=1000,
+        marketplaces=["blocket"], scoring_mode="plain", search_phrases=["old phrase"],
+    )
+    draft = ProposeSearch.model_validate_json(PROPOSE_SEARCH_JSON)
+
+    search = draft_to_search(draft, base=existing)
+
+    assert search.scope == "local"
+    assert search.location == "Norrbotten"
+    assert search.max_price == 1000
+    assert search.marketplaces == ["blocket"]
+    assert search.name == "Marantz PM6007"  # overwritten - Claude-generated
+    assert search.scoring_mode == "rated"  # overwritten - Claude-generated
+    assert search.search_phrases == ["Marantz PM6007", "Yamaha A-S301"]  # overwritten
 
 
 def test_draft_to_search_keeps_only_the_included_phrases():
