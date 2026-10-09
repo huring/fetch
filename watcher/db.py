@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS searches (
     search_phrases TEXT NOT NULL DEFAULT '[]',
     marketplaces TEXT NOT NULL DEFAULT '[]',
     creation_prompt TEXT,
+    ignored_suggestions TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -475,6 +476,20 @@ def _migrate_add_listing_feedback(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_add_search_ignored_suggestions(conn: sqlite3.Connection) -> None:
+    """Adds ignored_suggestions to a searches table created before the
+    "Learned from feedback" suggestion panel existed (backlog #30) - the
+    list of suggestion keys ("<field>|<value>") dismissed from that panel.
+    No-op on a fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "searches" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(searches)")}
+    if "ignored_suggestions" not in columns:
+        conn.execute("ALTER TABLE searches ADD COLUMN ignored_suggestions TEXT NOT NULL DEFAULT '[]'")
+        conn.commit()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -498,6 +513,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_watched_item_in_stock(conn)
     _migrate_add_watched_item_last_error_status(conn)
     _migrate_add_listing_feedback(conn)
+    _migrate_add_search_ignored_suggestions(conn)
     conn.executescript(SCHEMA)
     conn.commit()
     return conn

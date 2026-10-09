@@ -23,6 +23,7 @@ from watcher.marketplaces import get as get_marketplace
 from watcher.models import Search, WatchedItem, WatchedModel
 from watcher.scoring import search_builder
 from watcher.scoring.search_preview import estimate_result_counts
+from watcher import suggestions as suggestions_repo
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -244,8 +245,46 @@ def edit_search_form(request: Request, search_id: int):
             "marketplaces": list(MARKETPLACES.values()),
             "built_from_prompt": bool(search and search.creation_prompt),
             "search_id": search_id,
+            "suggestions": suggestions_repo.build_suggestions(conn, search) if search else [],
         },
     )
+
+
+def _apply_suggestion(search: Search, field: str, value: str) -> None:
+    if field in ("excluded_models", "excluded_words", "required_keywords"):
+        existing = getattr(search, field)
+        if not any(value.lower() == item.lower() for item in existing):
+            existing.append(value)
+    elif field == "max_price":
+        search.max_price = int(value)
+    elif field == "min_price":
+        search.min_price = int(value)
+    elif field == "require_shipping":
+        search.require_shipping = True
+    elif field == "watched_models":
+        data = json.loads(value)
+        pattern = data.get("pattern", "")
+        if pattern and not any(pattern.lower() == wm.pattern.lower() for wm in search.watched_models):
+            search.watched_models.append(
+                WatchedModel(pattern=pattern, note="Liked listing", good_price=data.get("good_price", ""), is_ideal=True)
+            )
+
+
+@router.post("/searches/{search_id}/suggestions/{action}")
+async def handle_suggestion(request: Request, search_id: int, action: str):
+    conn = request.app.state.conn
+    form_data = await request.form()
+    field = form_data.get("field", "")
+    value = form_data.get("value", "")
+    search = searches_repo.get_search(conn, search_id)
+    if search is not None and field and action in ("apply", "ignore"):
+        key = f"{field}|{value}"
+        if action == "apply":
+            _apply_suggestion(search, field, value)
+        elif key not in search.ignored_suggestions:
+            search.ignored_suggestions.append(key)
+        searches_repo.update_search(conn, search_id, search)
+    return RedirectResponse(f"/searches/{search_id}/edit", status_code=303)
 
 
 @router.post("/searches/{search_id}/edit")
@@ -253,6 +292,13 @@ async def update_search(request: Request, search_id: int):
     conn = request.app.state.conn
     form_data = await request.form()
     search = _form_to_search(form_data)
+    # _form_to_search only knows the fields the manual form actually has -
+    # ignored_suggestions (like creation_prompt) isn't one of them, so carry
+    # it over from the existing row rather than letting a manual save reset
+    # every suggestion Lars already dismissed back to "not ignored".
+    existing = searches_repo.get_search(conn, search_id)
+    if existing is not None:
+        search.ignored_suggestions = existing.ignored_suggestions
     searches_repo.update_search(conn, search_id, search)
     return RedirectResponse("/searches", status_code=303)
 

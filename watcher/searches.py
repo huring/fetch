@@ -13,6 +13,7 @@ _LIST_FIELDS = (
     "required_keywords",
     "search_phrases",
     "marketplaces",
+    "ignored_suggestions",
 )
 _MODEL_LIST_FIELDS = {
     "watched_models": WatchedModel,

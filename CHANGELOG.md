@@ -4,19 +4,26 @@ Completed backlog stories move here (see `backlog.md` and `CLAUDE.md` for the
 workflow). Newest first.
 
 ## 2026-10-09
-- **Added per-listing "like"/"not interested" feedback to the admin UI
-  (partial progress on backlog #30)** - each listing in a search's listing
-  table now has an inline feedback control: pick "Like" or a specific reason
-  for not being interested (wrong model/variant, missing a feature, bad
-  condition, too expensive, too cheap/suspicious, no shipping, too far away,
-  or just not interested), with an optional free-text detail (e.g. "no 4K
-  support"). A "not interested" listing drops out of the Found/Maybe/Yes!
-  buckets into its own "Not interested" tab, so it stops competing for
-  attention without being deleted - feedback can always be undone from
-  there. This is the data-capture half of the plan; the follow-up (a
-  suggestion-review panel that turns accumulated feedback into proposed
-  edits to a search's excluded models/words, required keywords, price
-  range, or ideal models) is tracked as the remaining backlog #30.
+- **Added per-listing "like"/"not interested" feedback to the admin UI, plus
+  a suggestion panel that turns it into search-config edits (was backlog
+  #30)** - each listing in a search's listing table now has an inline
+  feedback control: pick "Like" or a specific reason for not being
+  interested (wrong model/variant, missing a feature, bad condition, too
+  expensive, too cheap/suspicious, no shipping, too far away, or just not
+  interested), with an optional free-text detail (e.g. "no 4K support"). A
+  "not interested" listing drops out of the Found/Maybe/Yes! buckets into
+  its own "Not interested" tab, so it stops competing for attention without
+  being deleted - feedback can always be undone from there. The search edit
+  page now also shows a "Learned from feedback" panel that aggregates this
+  into proposed one-click edits (never applied automatically): excluding a
+  named model, requiring a mentioned feature, excluding a bad-condition
+  phrase, tightening the price range, turning on "require shipping", or
+  adding a liked item as an ideal watched model. Each suggestion can be
+  applied or ignored individually; ignored ones stay ignored even after
+  later manually editing the search. Deliberately not wired into Claude's
+  own scoring prompt yet (per Lars, 2026-10-09) - that's left for later,
+  once there's enough real feedback data to judge whether it's clean enough
+  to feed a prompt.
 - **Fixed the admin UI's wizard feeling laggy while typing a prompt (was
   backlog #26)** - root cause: `base.html` was loading Tailwind's "Play
   CDN" script (`cdn.tailwindcss.com`), a ~400KB JIT compiler that recomputes

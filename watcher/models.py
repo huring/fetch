@@ -76,6 +76,12 @@ class Search(BaseModel):
     # not reflected back into this text and will be lost on the next
     # regeneration (the admin UI warns about this - see search_form.html).
     creation_prompt: Optional[str] = None
+    # Suggestion keys ("<field>|<value>", see watcher/suggestions.py) the user
+    # has dismissed from this search's "Learned from feedback" panel - kept
+    # so a re-computed suggestion (built fresh from current listings.feedback
+    # rows every time the edit page loads) doesn't keep reoffering something
+    # already declined.
+    ignored_suggestions: List[str] = Field(default_factory=list)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

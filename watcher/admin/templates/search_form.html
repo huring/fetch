@@ -10,6 +10,30 @@
     (including anything you change here) is left as-is.
 </p>
 {% endif %}
+{% if is_edit and suggestions %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-indigo-900/30 border border-indigo-700">
+    <h2 class="text-sm font-semibold text-indigo-200 mb-2">Learned from feedback</h2>
+    <ul class="space-y-2">
+    {% for s in suggestions %}
+        <li class="flex items-center justify-between gap-3 text-sm text-gray-200">
+            <span>{{ s.label }}</span>
+            <span class="flex gap-2 shrink-0">
+                <form method="post" action="/searches/{{ search_id }}/suggestions/apply" class="inline">
+                    <input type="hidden" name="field" value="{{ s.field }}">
+                    <input type="hidden" name="value" value="{{ s.value }}">
+                    <button type="submit" class="text-xs px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white">Apply</button>
+                </form>
+                <form method="post" action="/searches/{{ search_id }}/suggestions/ignore" class="inline">
+                    <input type="hidden" name="field" value="{{ s.field }}">
+                    <input type="hidden" name="value" value="{{ s.value }}">
+                    <button type="submit" class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200">Ignore</button>
+                </form>
+            </span>
+        </li>
+    {% endfor %}
+    </ul>
+</div>
+{% endif %}
 <form method="post" action="{{ action_url }}" class="space-y-4">
     <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
         <legend class="text-sm font-semibold text-gray-200 px-1">Basics</legend>
