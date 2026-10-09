@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit" if search_id else "New" }} search via prompt - Fetch{% endblock %}
+{% block content %}
+{% set turn_action_url = "/searches/" ~ search_id ~ "/edit-from-prompt" if search_id else "/searches/new-from-prompt" %}
+{% set draft_action_url = turn_action_url ~ "/draft" %}
+<h1 class="text-xl font-semibold mb-1">{{ "Edit" if search_id else "New" }} search via prompt</h1>
+<p class="text-sm text-gray-400 mb-4">
+    Describe what you're looking for in plain text - Claude will ask if anything's unclear, then propose a
+    full search configuration to review before it's saved.
+    <a href="{{ '/searches/' ~ search_id ~ '/edit' if search_id else '/searches/new' }}" class="underline">Build it manually instead</a>.
+</p>
+
+{% if stage == "start" %}
+<form method="post" action="{{ turn_action_url }}" class="space-y-4">
+    {% if search_id and not existing_prompt %}
+    <p class="px-4 py-3 rounded-lg bg-amber-900/40 border border-amber-700 text-amber-200 text-sm">
+        This search wasn't originally built from a prompt. Writing one here and generating will replace its
+        entire current configuration.
+    </p>
+    {% endif %}
+    <label class="block text-sm font-medium text-gray-300 mb-1">What are you looking for?
+        <textarea name="prompt" required class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 min-h-[8rem]" placeholder="t.ex. En bra stereoförstärkare, typ Marantz PM6007 eller liknande, max 3000kr, helst i Norrbotten.">{{ existing_prompt }}</textarea>
+    </label>
+    <div class="flex gap-3">
+        <button type="submit" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">Generate</button>
+        <a href="/searches" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Cancel</a>
+    </div>
+</form>
+{% endif %}
+
+{% if stage == "ask" %}
+<form method="post" action="{{ turn_action_url }}" class="space-y-4">
+    <input type="hidden" name="transcript" value='{{ transcript_json }}'>
+    <input type="hidden" name="pending_question_json" value='{{ pending_question_json }}'>
+    <div class="px-4 py-3 rounded-lg bg-gray-800 border border-gray-700">
+        <p class="text-xs uppercase tracking-wide text-gray-400 mb-1">Claude asks</p>
+        <p class="text-gray-100">{{ question }}</p>
+    </div>
+    <label class="block text-sm font-medium text-gray-300 mb-1">Your answer
+        <textarea name="answer" class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100 min-h-[4rem]"></textarea>
+    </label>
+    <div class="flex gap-3">
+        <button type="submit" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">Answer</button>
+        <button type="submit" name="skip" value="1" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Skip - use your best judgement</button>
+    </div>
+</form>
+{% endif %}
+
+{% if stage == "draft" %}
+<form method="post" action="{{ draft_action_url }}" class="space-y-4">
+    <input type="hidden" name="transcript" value='{{ transcript_json }}'>
+    <input type="hidden" name="draft_json" value='{{ draft_json }}'>
+
+    {% if name_error %}
+    <p class="px-4 py-3 rounded-lg bg-red-900/40 border border-red-700 text-red-200 text-sm">{{ name_error }}</p>
+    {% endif %}
+
+    <div class="px-4 py-3 rounded-lg bg-gray-800 border border-gray-700">
+        <p class="text-xs uppercase tracking-wide text-gray-400 mb-1">Proposed search</p>
+        <p class="text-gray-100">{{ draft.summary }}</p>
+    </div>
+
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Basics</legend>
+        <label class="block text-sm font-medium text-gray-300 mt-3 mb-1">Name
+            <input type="text" name="name" value="{{ name_value }}" required class="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-gray-100">
+        </label>
+        <dl class="mt-3 text-sm text-gray-300 grid grid-cols-2 gap-x-4 gap-y-1">
+            <dt class="text-gray-400">Scope</dt><dd>{{ draft.scope }}{% if draft.location %} ({{ draft.location }}){% endif %}</dd>
+            <dt class="text-gray-400">Mode</dt><dd>{{ "AI-rated" if draft.scoring_mode == "rated" else "Plain" }}</dd>
+            <dt class="text-gray-400">Price range</dt><dd>{{ draft.min_price or "no floor" }} - {{ draft.max_price or "no ceiling" }} SEK</dd>
+            <dt class="text-gray-400">Shipping required</dt><dd>{{ "yes" if draft.require_shipping else "no" }}</dd>
+            <dt class="text-gray-400">Digest style</dt><dd>{{ draft.digest_style }}</dd>
+            {% if draft.scoring_mode == "plain" and draft.instant_alert_price %}
+            <dt class="text-gray-400">Instant alert price</dt><dd>{{ draft.instant_alert_price }} SEK</dd>
+            {% endif %}
+        </dl>
+    </fieldset>
+
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Search phrases</legend>
+        {% for p in draft.search_phrases %}
+        <label class="flex items-start gap-2 text-sm text-gray-300 mt-2">
+            <input type="checkbox" name="phrase_included" value="{{ loop.index0 }}" {{ "checked" if loop.index0 in checked_indices else "" }} class="w-4 h-4 mt-0.5 accent-indigo-500">
+            <span>
+                {{ p.text }}
+                {% if p.source == "suggested" %}<span class="ml-1 inline-flex px-1.5 py-0.5 rounded text-xs bg-indigo-900 text-indigo-300">suggested</span>{% if p.note %} <span class="text-gray-400">- {{ p.note }}</span>{% endif %}{% endif %}
+            </span>
+        </label>
+        {% endfor %}
+    </fieldset>
+
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Marketplaces</legend>
+        <p class="mt-2">
+        {% for key in draft.marketplaces %}
+        <span class="inline-flex px-2 py-1 mr-2 mt-1 rounded-md bg-gray-700 text-gray-100 text-xs">{{ marketplace_names.get(key, key) }}</span>
+        {% endfor %}
+        </p>
+
+        {% if counts is not none %}
+        <dl class="mt-3 text-sm text-gray-300 space-y-1">
+            {% for key, estimate in counts.items() %}
+            <div><dt class="inline text-gray-400">{{ marketplace_names.get(key, key) }}:</dt> <dd class="inline">~{{ estimate.total }}{{ "+" if not estimate.exact else "" }} total matches{% if not estimate.exact %} <span class="text-gray-500">(couldn't get an exact count)</span>{% endif %}</dd></div>
+            {% else %}
+            <p class="text-gray-500">No estimate available for the selected marketplaces.</p>
+            {% endfor %}
+        </dl>
+        <p class="text-xs text-gray-500 mt-1">This is the raw pool Fetch would filter/rate from, not the smaller number it actually pulls in each cycle.</p>
+        {% endif %}
+
+        <button type="submit" name="do" value="preview" class="mt-3 px-3 py-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Preview result counts</button>
+    </fieldset>
+
+    {% if draft.hard_criteria or draft.soft_criteria or draft.watched_models or draft.excluded_models or draft.excluded_words or draft.required_keywords %}
+    <fieldset class="border border-gray-700 rounded-lg p-4 bg-gray-800">
+        <legend class="text-sm font-semibold text-gray-200 px-1">Other criteria</legend>
+        {% if draft.hard_criteria %}<p class="text-sm text-gray-300 mt-2"><span class="text-gray-400">Hard requirements:</span> {{ draft.hard_criteria | join("; ") }}</p>{% endif %}
+        {% if draft.soft_criteria %}<p class="text-sm text-gray-300 mt-2"><span class="text-gray-400">Nice-to-haves:</span> {{ draft.soft_criteria | join("; ") }}</p>{% endif %}
+        {% if draft.watched_models %}
+        <div class="text-sm text-gray-300 mt-2">
+            <span class="text-gray-400">Watched models:</span>
+            <ul class="list-disc list-inside">
+                {% for wm in draft.watched_models %}<li>{{ wm.pattern }}{% if wm.is_ideal %} <span class="text-xs text-indigo-300">(grail target)</span>{% endif %} - {{ wm.note }}{% if wm.good_price %}, good price: {{ wm.good_price }}{% endif %}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        {% if draft.excluded_models %}<p class="text-sm text-gray-300 mt-2"><span class="text-gray-400">Excluded models:</span> {{ draft.excluded_models | join(", ") }}</p>{% endif %}
+        {% if draft.excluded_words %}<p class="text-sm text-gray-300 mt-2"><span class="text-gray-400">Excluded words:</span> {{ draft.excluded_words | join(", ") }}</p>{% endif %}
+        {% if draft.required_keywords %}<p class="text-sm text-gray-300 mt-2"><span class="text-gray-400">Required keywords:</span> {{ draft.required_keywords | join(", ") }}</p>{% endif %}
+    </fieldset>
+    {% endif %}
+
+    <div class="flex gap-3">
+        <button type="submit" name="do" value="create" class="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white">{{ "Save changes" if search_id else "Create this search" }}</button>
+        <a href="{{ '/searches/' ~ search_id ~ '/edit-from-prompt' if search_id else '/searches/new-from-prompt' }}" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Start over with a different prompt</a>
+        <a href="/searches" class="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Cancel</a>
+    </div>
+</form>
+{% endif %}
+
+{% if stage == "error" %}
+<div class="px-4 py-3 rounded-lg bg-red-900/40 border border-red-700 text-red-200 text-sm">{{ error }}</div>
+<a href="{{ '/searches/' ~ search_id ~ '/edit-from-prompt' if search_id else '/searches/new-from-prompt' }}" class="inline-block mt-4 px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-sm font-medium text-gray-100">Try again</a>
+{% endif %}
+{% endblock %}

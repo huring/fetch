@@ -1,3 +1,4 @@
+import pytest
 import responses
 from responses import matchers
 
@@ -162,6 +163,26 @@ def test_fetch_raises_source_error_on_http_failure():
         assert False, "expected SourceError"
     except SourceError:
         pass
+
+
+@responses.activate
+def test_count_reads_total_entries_from_pagination():
+    responses.add(
+        responses.GET, auctionet.SEARCH_URL,
+        json={"items": [], "pagination": {"current_page": 1, "total_pages": 5, "total_entries": 123}},
+        status=200,
+        match=_search_match("receiver", page=1),
+    )
+
+    assert auctionet.count("receiver") == 123
+
+
+@responses.activate
+def test_count_raises_source_error_on_http_failure():
+    responses.add(responses.GET, auctionet.SEARCH_URL, status=500, match=_search_match("receiver", page=1))
+
+    with pytest.raises(SourceError):
+        auctionet.count("receiver")
 
 
 @responses.activate

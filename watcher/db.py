@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS searches (
     soft_criteria TEXT NOT NULL DEFAULT '[]',
     search_phrases TEXT NOT NULL DEFAULT '[]',
     marketplaces TEXT NOT NULL DEFAULT '[]',
+    creation_prompt TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -356,6 +357,20 @@ def _migrate_add_listing_distance_km(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_add_search_creation_prompt(conn: sqlite3.Connection) -> None:
+    """Adds creation_prompt (see models.Search) to a searches table created
+    before it existed - the free-text prompt a search was generated from, if
+    it was built with the NLP search builder rather than the manual form.
+    No-op on a fresh DB or an already-migrated one."""
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "searches" not in tables:
+        return
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(searches)")}
+    if "creation_prompt" not in columns:
+        conn.execute("ALTER TABLE searches ADD COLUMN creation_prompt TEXT")
+        conn.commit()
+
+
 def _migrate_add_watched_item_currency(conn: sqlite3.Connection) -> None:
     """Adds the currency column to a watched_items table created before
     price_watch.py tracked it (it previously only ever showed "SEK" in
@@ -452,6 +467,7 @@ def connect(db_path: str) -> sqlite3.Connection:
     _migrate_add_auction_ends_at(conn)
     _migrate_add_listing_image_url(conn)
     _migrate_add_listing_distance_km(conn)
+    _migrate_add_search_creation_prompt(conn)
     _migrate_add_watched_item_currency(conn)
     _migrate_add_watched_item_failure_tracking(conn)
     _migrate_add_watched_item_enrichment(conn)

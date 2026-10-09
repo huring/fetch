@@ -154,7 +154,7 @@ def _parse_product_page(html: str, url: str) -> Optional[Listing]:
     )
 
 
-def fetch(phrase: str) -> List[Listing]:
+def _matching_urls(phrase: str) -> List[str]:
     # Slugs separate model numbers with hyphens (e.g. "accuphase-a-46"), so a
     # phrase word is compared against the slug with hyphens normalized to
     # spaces on BOTH sides - otherwise a hyphenated phrase word like "a-46"
@@ -164,9 +164,21 @@ def fetch(phrase: str) -> List[Listing]:
     words = [w for w in phrase.lower().replace("-", " ").split() if w]
     if not words:
         return []
-
     catalog = _get_product_catalog()
-    matches = [url for url, slug in catalog if all(w in slug.replace("-", " ") for w in words)]
+    return [url for url, slug in catalog if all(w in slug.replace("-", " ") for w in words)]
+
+
+def count(phrase: str) -> int:
+    """Exact number of catalog products (current stock and historical/sold
+    alike - this doesn't distinguish) matching a search phrase, for the NLP
+    search builder's result-size preview (backlog #21). Free: just a slug
+    match against the already-cached sitemap, no network request at all
+    beyond whatever already keeps that cache warm."""
+    return len(_matching_urls(phrase))
+
+
+def fetch(phrase: str) -> List[Listing]:
+    matches = _matching_urls(phrase)
     if len(matches) > MAX_CANDIDATES_PER_PHRASE:
         logger.warning(
             "Rehifi phrase %r matched %d products - checking only the first %d",

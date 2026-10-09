@@ -1,3 +1,4 @@
+import pytest
 import responses
 from responses import matchers
 
@@ -223,3 +224,41 @@ def test_check_active_false_when_jsonld_missing_on_200():
 
 def test_check_active_empty_url_returns_false():
     assert blocket.check_active("") is False
+
+
+@responses.activate
+def test_count_reads_match_count_from_metadata():
+    match = [matchers.query_param_matcher({
+        "q": "förstärkare", "cg": blocket.DEFAULT_CATEGORY, "sc": blocket.DEFAULT_SUB_CATEGORY,
+        "sort": "PUBLISHED_DESC", "page": "1",
+    })]
+    responses.add(
+        responses.GET, blocket.SEARCH_URL, status=200,
+        json={"docs": [], "metadata": {"result_size": {"match_count": 2789}}},
+        match=match,
+    )
+
+    assert blocket.count("förstärkare") == 2789
+
+
+@responses.activate
+def test_count_passes_location_code_when_given():
+    match = [matchers.query_param_matcher({
+        "q": "ski-doo", "cg": blocket.DEFAULT_CATEGORY, "sc": blocket.DEFAULT_SUB_CATEGORY,
+        "sort": "PUBLISHED_DESC", "page": "1", "location": "0.300025",
+    })]
+    responses.add(
+        responses.GET, blocket.SEARCH_URL, status=200,
+        json={"docs": [], "metadata": {"result_size": {"match_count": 9}}},
+        match=match,
+    )
+
+    assert blocket.count("ski-doo", location_code="0.300025") == 9
+
+
+@responses.activate
+def test_count_raises_source_error_on_http_failure():
+    responses.add(responses.GET, blocket.SEARCH_URL, status=500)
+
+    with pytest.raises(SourceError):
+        blocket.count("onkyo")

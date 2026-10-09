@@ -82,6 +82,10 @@ def create_app(settings: Optional[Settings] = None, *, start_background_jobs: bo
         client = Anthropic(api_key=settings.anthropic_api_key) if settings.anthropic_api_key else None
         app.state.conn = conn
         app.state.settings = settings
+        # Exposed for the NLP search builder (backlog #21), the one HTTP
+        # route in this app that calls Claude synchronously in the request
+        # path - every other use of `client` below is a background job.
+        app.state.client = client
 
         # Background jobs (tick, digest, liveness sweep, manually-triggered
         # runs) get their own connection, separate from the one HTTP routes

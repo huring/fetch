@@ -60,6 +60,20 @@ def test_update_search(conn):
     assert updated.hard_criteria == ["bred minst 80cm"]
 
 
+def test_creation_prompt_round_trips(conn):
+    created = searches.create_search(
+        conn, Search(name="Förstärkare", creation_prompt="En bra stereoförstärkare, max 3000kr")
+    )
+    assert created.creation_prompt == "En bra stereoförstärkare, max 3000kr"
+    fetched = searches.get_search(conn, created.id)
+    assert fetched.creation_prompt == "En bra stereoförstärkare, max 3000kr"
+
+
+def test_creation_prompt_defaults_to_none_for_a_manually_built_search(conn):
+    created = searches.create_search(conn, Search(name="Manual search"))
+    assert created.creation_prompt is None
+
+
 def test_delete_search(conn):
     created = searches.create_search(conn, Search(name="Temp"))
     searches.delete_search(conn, created.id)

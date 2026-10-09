@@ -3,8 +3,10 @@ server-rendered (no JS)."""
 from __future__ import annotations
 
 import datetime
+import json
+import sqlite3
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -17,6 +19,8 @@ from watcher import watched_items as watched_items_repo
 from watcher.marketplaces import MARKETPLACES
 from watcher.marketplaces import get as get_marketplace
 from watcher.models import Search, WatchedItem, WatchedModel
+from watcher.scoring import search_builder
+from watcher.scoring.search_preview import estimate_result_counts
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -216,6 +220,8 @@ def edit_search_form(request: Request, search_id: int):
         {
             "form": _search_to_form(search), "is_edit": True, "action_url": f"/searches/{search_id}/edit",
             "marketplaces": list(MARKETPLACES.values()),
+            "built_from_prompt": bool(search and search.creation_prompt),
+            "search_id": search_id,
         },
     )
 
@@ -227,6 +233,171 @@ async def update_search(request: Request, search_id: int):
     search = _form_to_search(form_data)
     searches_repo.update_search(conn, search_id, search)
     return RedirectResponse("/searches", status_code=303)
+
+
+# --- NLP search builder (backlog #21) -----------------------------------
+#
+# A short back-and-forth driven turn-by-turn across page loads, same as
+# every other route in this server-rendered (no JS) app - the running
+# transcript and (mid-draft) the generated draft itself are round-tripped as
+# hidden form fields rather than kept in any server-side session state. See
+# watcher/scoring/search_builder.py's module docstring for why this is a
+# handful of structured-output calls rather than Anthropic tool-use.
+
+def _marketplace_names() -> Dict[str, str]:
+    return {m.key: m.display_name for m in MARKETPLACES.values()}
+
+
+def _transcript_from_form(form_data) -> List[Dict[str, str]]:
+    """The first submission on a fresh wizard has no transcript yet - just
+    the prompt textarea. Every later submission (answering a question) has
+    one, plus the question being answered (carried separately as
+    pending_question_json, since the "ask" screen only displays its text,
+    not its JSON) and either a typed answer or the "skip" button."""
+    transcript_json = form_data.get("transcript", "").strip()
+    if not transcript_json:
+        return [{"role": "user", "content": form_data.get("prompt", "").strip()}]
+    transcript = json.loads(transcript_json)
+    pending_question_json = form_data.get("pending_question_json", "")
+    if pending_question_json:
+        transcript.append({"role": "assistant", "content": pending_question_json})
+    answer = (
+        "(no preference - use your best judgement)"
+        if form_data.get("skip")
+        else form_data.get("answer", "").strip()
+    )
+    transcript.append({"role": "user", "content": answer})
+    return transcript
+
+
+def _wizard_error(request: Request, error: str, search_id: Optional[int]) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, "search_prompt_wizard.html", {"stage": "error", "error": error, "search_id": search_id}
+    )
+
+
+def _advance_wizard(request: Request, search_id: Optional[int], transcript: List[Dict[str, str]]) -> HTMLResponse:
+    conn = request.app.state.conn
+    settings = request.app.state.settings
+    client = request.app.state.client
+    if client is None:
+        return _wizard_error(
+            request, "ANTHROPIC_API_KEY isn't configured, so the search builder can't call Claude.", search_id
+        )
+
+    round_count = sum(1 for turn in transcript if turn["role"] == "assistant")
+    force_propose = round_count >= search_builder.MAX_QUESTION_ROUNDS
+    try:
+        turn = search_builder.run_turn(conn, client, settings, transcript, force_propose=force_propose)
+    except search_builder.SearchBuilderError as exc:
+        return _wizard_error(request, str(exc), search_id)
+
+    if turn.action == "ask_user":
+        return templates.TemplateResponse(
+            request, "search_prompt_wizard.html",
+            {
+                "stage": "ask", "question": turn.ask_user.question, "search_id": search_id,
+                "transcript_json": json.dumps(transcript), "pending_question_json": turn.model_dump_json(),
+            },
+        )
+
+    draft = turn.propose_search
+    return templates.TemplateResponse(
+        request, "search_prompt_wizard.html",
+        {
+            "stage": "draft", "draft": draft, "draft_json": draft.model_dump_json(),
+            "transcript_json": json.dumps(transcript), "counts": None, "name_error": None,
+            "name_value": draft.name, "checked_indices": set(range(len(draft.search_phrases))),
+            "search_id": search_id, "marketplace_names": _marketplace_names(),
+        },
+    )
+
+
+def _handle_draft_action(request: Request, form_data, search_id: Optional[int]) -> HTMLResponse:
+    conn = request.app.state.conn
+    settings = request.app.state.settings
+    draft = search_builder.ProposeSearch.model_validate_json(form_data.get("draft_json"))
+    name = (form_data.get("name") or draft.name).strip() or draft.name
+    checked_indices = {int(i) for i in form_data.getlist("phrase_included")}
+    included_phrases = [p.text for i, p in enumerate(draft.search_phrases) if i in checked_indices]
+    transcript_json = form_data.get("transcript", "[]")
+
+    search = search_builder.draft_to_search(draft, included_phrases=included_phrases)
+    search.name = name
+
+    if form_data.get("do") == "preview":
+        counts = estimate_result_counts(settings, search)
+        return templates.TemplateResponse(
+            request, "search_prompt_wizard.html",
+            {
+                "stage": "draft", "draft": draft, "draft_json": form_data.get("draft_json"),
+                "transcript_json": transcript_json, "counts": counts, "name_error": None,
+                "name_value": name, "checked_indices": checked_indices,
+                "search_id": search_id, "marketplace_names": _marketplace_names(),
+            },
+        )
+
+    search.creation_prompt = search_builder.collapse_transcript_to_prompt(json.loads(transcript_json))
+    try:
+        if search_id is None:
+            searches_repo.create_search(conn, search)
+        else:
+            searches_repo.update_search(conn, search_id, search)
+    except sqlite3.IntegrityError:
+        return templates.TemplateResponse(
+            request, "search_prompt_wizard.html",
+            {
+                "stage": "draft", "draft": draft, "draft_json": form_data.get("draft_json"),
+                "transcript_json": transcript_json, "counts": None,
+                "name_error": f'A search named "{name}" already exists - choose a different name.',
+                "name_value": name, "checked_indices": checked_indices,
+                "search_id": search_id, "marketplace_names": _marketplace_names(),
+            },
+        )
+    return RedirectResponse("/searches", status_code=303)
+
+
+@router.get("/searches/new-from-prompt", response_class=HTMLResponse)
+def new_search_from_prompt_form(request: Request):
+    return templates.TemplateResponse(
+        request, "search_prompt_wizard.html", {"stage": "start", "search_id": None, "existing_prompt": ""}
+    )
+
+
+@router.post("/searches/new-from-prompt")
+async def new_search_from_prompt_turn(request: Request):
+    form_data = await request.form()
+    return _advance_wizard(request, None, _transcript_from_form(form_data))
+
+
+@router.post("/searches/new-from-prompt/draft")
+async def new_search_from_prompt_draft(request: Request):
+    form_data = await request.form()
+    return _handle_draft_action(request, form_data, None)
+
+
+@router.get("/searches/{search_id}/edit-from-prompt", response_class=HTMLResponse)
+def edit_search_from_prompt_form(request: Request, search_id: int):
+    conn = request.app.state.conn
+    search = searches_repo.get_search(conn, search_id)
+    if search is None:
+        return RedirectResponse("/searches", status_code=303)
+    return templates.TemplateResponse(
+        request, "search_prompt_wizard.html",
+        {"stage": "start", "search_id": search_id, "existing_prompt": search.creation_prompt or ""},
+    )
+
+
+@router.post("/searches/{search_id}/edit-from-prompt")
+async def edit_search_from_prompt_turn(request: Request, search_id: int):
+    form_data = await request.form()
+    return _advance_wizard(request, search_id, _transcript_from_form(form_data))
+
+
+@router.post("/searches/{search_id}/edit-from-prompt/draft")
+async def edit_search_from_prompt_draft(request: Request, search_id: int):
+    form_data = await request.form()
+    return _handle_draft_action(request, form_data, search_id)
 
 
 @router.post("/searches/{search_id}/toggle")

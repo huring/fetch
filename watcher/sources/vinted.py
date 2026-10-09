@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -40,6 +40,8 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/1
 
 _PUSH_RE = re.compile(r"self\.__next_f\.push\((\[.*?\])\)</script>", re.S)
 _ITEMS_MARKER = '"items":{"items":['
+_PAGE_LINK_RE = re.compile(r'data-testid="catalog-pagination--page-(\d+)"')
+_PAGINATION_ELLIPSIS_MARKER = "web_ui__Pagination__ellipsis"
 
 
 def fetch(q: str, max_pages: int = 2) -> List[Listing]:
@@ -68,6 +70,30 @@ def fetch(q: str, max_pages: int = 2) -> List[Listing]:
         if len(items) < ITEMS_PER_PAGE:
             break  # last page
     return listings
+
+
+def count(q: str) -> Tuple[int, bool]:
+    """Approximate total matches for a search phrase, for the NLP search
+    builder's result-size preview (backlog #21) - Vinted doesn't expose a
+    total-match count anywhere (unlike Blocket/Auctionet), so this is read
+    off the server-rendered pagination nav on a single page-1 request:
+    the highest page number shown, times ITEMS_PER_PAGE. Confirmed live
+    (2026-10): that nav only ever lists up to 3 page numbers before an
+    "…" - past that point there's no way to learn the true last page without
+    paging through everything, so the result is a confirmed lower bound
+    rather than a count (the second return value is False in that case)."""
+    headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
+    try:
+        html = get_text(SEARCH_URL, params={"search_text": q, "order": "newest_first", "page": 1}, headers=headers)
+    except Exception as exc:
+        raise SourceError(f"Vinted count failed for q={q!r}: {exc}") from exc
+
+    page_numbers = [int(n) for n in _PAGE_LINK_RE.findall(html)]
+    if not page_numbers:
+        return len(_extract_catalog_items(html)), True
+    highest_page = max(page_numbers)
+    truncated = _PAGINATION_ELLIPSIS_MARKER in html
+    return highest_page * ITEMS_PER_PAGE, not truncated
 
 
 def _extract_catalog_items(html: str) -> List[Dict[str, Any]]:
